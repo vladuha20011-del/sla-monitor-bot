@@ -231,11 +231,13 @@ class SLABot:
                     parts = text.split()
                     full_command = parts[0].lower()
                     
-                    # Извлекаем базовую команду (без @username)
+                    # ИЗВЛЕКАЕМ БАЗОВУЮ КОМАНДУ (отрезаем @username если есть)
                     if '@' in full_command:
                         base_command = full_command.split('@')[0]
+                        logger.debug(f"Команда с @username: {full_command} -> базовая: {base_command}")
                     else:
                         base_command = full_command
+                        logger.debug(f"Команда без @username: {base_command}")
                     
                     # Обрабатываем команды по base_command
                     if base_command == '/start':
@@ -245,7 +247,7 @@ class SLABot:
                                 "✅ Бот мониторинга SLA\n\n"
                                 "📋 Доступные команды:\n"
                                 "/alarm - показать все задачи с истекающим SLA\n"
-                                "/checking_dep - показать задачи только сотрудников отдела\n"
+                                "/checking_dep - показать задачи только сотрудников из базы\n"
                                 "/check - проверить конкретную задачу (Например: /check ZZ-123456)"
                             )
                         )
@@ -254,8 +256,11 @@ class SLABot:
                         help_text = (
                             "🤖 Команды бота:\n\n"
                             "/alarm - показать все задачи с истекающим SLA\n"
-                            "/checking_dep - показать задачи только сотрудников отдела\n"
-                            "/check - проверить конкретную задачу (Например: /check ZZ-123456)"
+                            "/checking_dep - показать задачи только сотрудников из базы\n"
+                            "/check - проверить конкретную задачу (Например: /check ZZ-123456)\n\n"
+                            "*Команды администратора:*\n"
+                            "/update - остановить бота для обновления\n"
+                            "/restart - перезапустить бота"
                         )
                         await self.bot.send_message(
                             chat_id=chat_id,
