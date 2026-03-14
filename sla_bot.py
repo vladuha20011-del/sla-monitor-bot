@@ -74,7 +74,7 @@ class SLABot:
                 if employee:  # Если сотрудник найден в базе
                     employee_tasks.append(task)
             
-            logger.info(f"📊 Задач от сотрудников из базы: {len(employee_tasks)}")
+            logger.info(f"📊 Задач от сотрудников отдела: {len(employee_tasks)}")
             
             # Из них отбираем те, что требуют уведомления
             tasks_to_notify = [t for t in employee_tasks if t.get('should_notify', False)]
@@ -373,7 +373,7 @@ class SLABot:
                         if not dep_tasks:
                             await self.bot.send_message(
                                 chat_id=chat_id,
-                                text="✅ Нет задач у сотрудников из базы"
+                                text="✅ Нет задач у сотрудников отдела"
                             )
                             continue
                         
@@ -383,12 +383,12 @@ class SLABot:
                         if not urgent_dep_tasks:
                             await self.bot.send_message(
                                 chat_id=chat_id,
-                                text="✅ У сотрудников из базы нет задач с истекающим SLA"
+                                text="✅ У сотрудников отдела нет задач с истекающим SLA"
                             )
                             continue
                         
                         # Формируем сообщение
-                        msg = f"⚠️ Найдено задач у сотрудников из базы: {len(urgent_dep_tasks)}\n\n"
+                        msg = f"⚠️ Найдено задач у сотрудников отдела: {len(urgent_dep_tasks)}\n\n"
                         
                         # Сортируем по времени до дедлайна
                         urgent_dep_tasks.sort(key=lambda x: x['hours_until_due'])
