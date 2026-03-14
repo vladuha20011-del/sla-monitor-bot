@@ -134,10 +134,14 @@ class TaskAPIClient:
                 hours_until_due = time_diff.total_seconds() / 3600
                 
                 # Проверяем, попадает ли задача в интервал предупреждения
+                # Уведомляем если задача критична (менее 24ч) ИЛИ просрочена
                 should_notify = False
-                if 0 < hours_until_due <= warning_hours:
+                if hours_until_due <= warning_hours:  # Уведомляем если осталось меньше 24ч ИЛИ просрочено
                     should_notify = True
-                    logger.info(f"⚠️ Задача {issue.get('key')}: до дедлайна {hours_until_due:.1f}ч (источник: {sla_source})")
+                    if hours_until_due < 0:
+                        logger.info(f"⚠️ Задача {issue.get('key')}: ПРОСРОЧЕНА на {abs(hours_until_due):.1f}ч (источник: {sla_source})")
+                    else:
+                        logger.info(f"⚠️ Задача {issue.get('key')}: до дедлайна {hours_until_due:.1f}ч (источник: {sla_source})")
                 
                 # Создаем задачу в нашем формате
                 task = {
@@ -348,29 +352,35 @@ async def test_jira_client():
     # Статистика
     total = len(tasks)
     with_sla = [t for t in tasks if t['due_date']]
+    urgent = [t for t in tasks if t.get('should_notify')]
+    overdue = [t for t in tasks if t.get('hours_until_due', 0) < 0]
     
     print(f"\n📊 Статистика:")
     print(f"   Всего получено задач: {total}")
     print(f"   Задач с SLA датой: {len(with_sla)}")
+    print(f"   Требуют уведомления: {len(urgent)}")
+    print(f"   Просрочено: {len(overdue)}")
     
-    if with_sla:
-        print(f"\n📋 ПЕРВЫЕ 10 ЗАДАЧ С SLA ДАТАМИ:")
+    if urgent:
+        print(f"\n📋 ЗАДАЧИ ДЛЯ УВЕДОМЛЕНИЯ:")
         print("-" * 80)
         
-        for i, task in enumerate(with_sla[:10], 1):
+        for i, task in enumerate(urgent[:10], 1):
             hours = task['hours_until_due']
-            time_str = f"{hours:.1f}ч" if hours else "Неизвестно"
+            if hours < 0:
+                status = "⚠️ ПРОСРОЧЕНО"
+                time_str = f"на {abs(hours):.1f}ч"
+            else:
+                status = "🔴 Критично" if hours < 12 else "🟡 Скоро"
+                time_str = f"{hours:.1f}ч"
             
-            print(f"\n{i}. [{task['status']}] {task['id']}")
-            print(f"   📌 {task['title'][:60]}")
-            print(f"   👤 Исполнитель: {task['assignee']}")
-            print(f"   ⏰ Дедлайн: {task['due_date'].strftime('%d.%m.%Y %H:%M')}")
-            print(f"   ⌛ Осталось: {time_str}")
-            print(f"   🔗 Источник: {task.get('due_date_source', 'неизвестно')}")
-            print(f"   🔗 {task['url']}")
+            print(f"\n{i}. {task['id']} - {task['title'][:50]}")
+            print(f"   Статус: {status}")
+            print(f"   Осталось: {time_str}")
+            print(f"   Исполнитель: {task['assignee']}")
     
     else:
-        print(f"\n❌ Задач с SLA датами не найдено.")
+        print(f"\n❌ Задач для уведомления не найдено.")
     
     print("\n" + "=" * 80)
     
