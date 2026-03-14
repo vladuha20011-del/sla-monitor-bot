@@ -550,7 +550,7 @@ class SLABot:
                 pass
     
         async def run_forever(self):
-        """Запускает бесконечный цикл"""
+            """Запускает бесконечный цикл"""
         logger.info(f"🚀 Бот запущен. Интервал проверки: {config.CHECK_INTERVAL_MINUTES} минут")
         
         # Сначала получаем последний update_id
