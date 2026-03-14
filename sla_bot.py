@@ -53,7 +53,7 @@ class SLABot:
             return False
     
     async def check_tasks(self):
-        """Проверяет задачи и отправляет уведомления"""
+        """Проверяет задачи и отправляет уведомления ТОЛЬКО для сотрудников из базы"""
         if not self.is_running:
             return
         
@@ -67,10 +67,19 @@ class SLABot:
                 logger.info("✅ Нет задач")
                 return
             
-            # Фильтруем задачи для уведомления
-            tasks_to_notify = [t for t in tasks if t.get('should_notify', False)]
+            # Фильтруем задачи: только те, где исполнитель есть в базе
+            employee_tasks = []
+            for task in tasks:
+                employee = find_employee_by_name(task['assignee'])
+                if employee:  # Если сотрудник найден в базе
+                    employee_tasks.append(task)
             
-            logger.info(f"📊 Задач для уведомления: {len(tasks_to_notify)}")
+            logger.info(f"📊 Задач от сотрудников из базы: {len(employee_tasks)}")
+            
+            # Из них отбираем те, что требуют уведомления
+            tasks_to_notify = [t for t in employee_tasks if t.get('should_notify', False)]
+            
+            logger.info(f"📊 Задач для уведомления (только сотрудники из базы): {len(tasks_to_notify)}")
             
             for task in tasks_to_notify:
                 if not self.is_running:
@@ -91,11 +100,11 @@ class SLABot:
         # Находим сотрудника по имени
         employee = find_employee_by_name(task['assignee'])
         
-        # Формируем упоминание исполнителя
+        # Формируем упоминание исполнителя (employee всегда есть, потому что мы отфильтровали)
         if employee:
             mention = f"{task['assignee']} {employee['telegram_username']}"
         else:
-            mention = f"{task['assignee']}"
+            mention = f"{task['assignee']}"  # Сюда не должны попадать, но оставим на всякий случай
         
         # Формируем сообщение (без Markdown)
         hours_left = task['hours_until_due']
@@ -513,7 +522,7 @@ class SLABot:
     
     async def run_forever(self):
         """Запускает бесконечный цикл"""
-        logger.info(f"🚀 Бот запущен. Интервал проверки: 30 минут")
+        logger.info(f"🚀 Бот запущен. Интервал проверки: 60 минут")
         
         # Сначала получаем последний update_id
         try:
@@ -535,9 +544,9 @@ class SLABot:
         
         while self.is_running:
             try:
-                # Проверяем задачи раз в 30 минут
+                # Проверяем задачи раз в 60 минут
                 current_minute = datetime.now().minute
-                if current_minute % 30 == 0:  # Проверка каждые 30 минут
+                if current_minute == 0:  # Проверка в начале каждого часа
                     await self.check_tasks()
                     await asyncio.sleep(60)  # Ждем минуту, чтобы не проверять несколько раз
                 
