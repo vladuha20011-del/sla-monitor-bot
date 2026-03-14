@@ -53,7 +53,7 @@ class SLABot:
             return False
     
     async def check_tasks(self):
-        """Проверяет задачи и отправляет уведомления ТОЛЬКО для сотрудников из базы"""
+        """Проверяет задачи и отправляет ОДНО общее уведомление"""
         if not self.is_running:
             return
         
@@ -81,66 +81,84 @@ class SLABot:
             
             logger.info(f"📊 Задач для уведомления (только сотрудники из базы): {len(tasks_to_notify)}")
             
-            for task in tasks_to_notify:
-                if not self.is_running:
-                    break
-                await self.send_notification(task)
+            if not tasks_to_notify:
+                logger.info("✅ Нет задач для уведомления")
+                return
+            
+            # Фильтруем задачи, которые ещё не уведомляли
+            new_tasks = [t for t in tasks_to_notify if t['id'] not in self.notified_tasks]
+            
+            if not new_tasks:
+                logger.info("✅ Нет новых задач для уведомления")
+                return
+            
+            # Формируем ОДНО общее сообщение
+            await self.send_bulk_notification(new_tasks)
                 
         except Exception as e:
             logger.error(f"❌ Ошибка при проверке задач: {e}", exc_info=True)
     
-    async def send_notification(self, task: Dict[str, Any]):
-        """Отправляет уведомление о задаче"""
-        task_id = task['id']
+    async def send_bulk_notification(self, tasks: list):
+        """Отправляет одно общее уведомление со всеми задачами"""
         
-        # Проверяем, не отправляли ли уже уведомление
-        if task_id in self.notified_tasks:
-            return
+        # Формируем заголовок
+        message = "⚠️ *Внимание! Приближается SLA!*\n\n"
         
-        # Находим сотрудника по имени
-        employee = find_employee_by_name(task['assignee'])
+        for i, task in enumerate(tasks):
+            # Находим сотрудника по имени
+            employee = find_employee_by_name(task['assignee'])
+            
+            # Формируем упоминание исполнителя
+            if employee:
+                mention = f"{task['assignee']} {employee['telegram_username']}"
+            else:
+                mention = f"{task['assignee']}"
+            
+            # Формируем время и статус
+            hours_left = task['hours_until_due']
+            time_str = self._format_time(hours_left)
+            sla_status = self._get_sla_status(hours_left)
+            
+            # Добавляем задачу в общее сообщение
+            message += (
+                f"📌 Задача: {task['id']}\n"
+                f"🔗 Ссылка: {task['url']}\n"
+                f"📋 Название: {task['title']}\n"
+                f"👤 Исполнитель: {mention}\n"
+                f"⏰ Дедлайн: {task['due_date'].strftime('%d.%m.%Y %H:%M')}\n"
+                f"⌛ Осталось: {time_str}\n"
+                f"📊 {sla_status}\n"
+                f"📈 Статус: {task['status']}\n"
+                f"🎯 Приоритет: {task['priority'] or 'Не указан'}\n\n"
+            )
+            
+            # Добавляем разделитель между задачами (кроме последней)
+            if i < len(tasks) - 1:
+                message += f"{'—' * 45}\n\n"
+            
+            # Добавляем задачу в список уведомлённых
+            self.notified_tasks.add(task['id'])
         
-        # Формируем упоминание исполнителя (employee всегда есть, потому что мы отфильтровали)
-        if employee:
-            mention = f"{task['assignee']} {employee['telegram_username']}"
-        else:
-            mention = f"{task['assignee']}"  # Сюда не должны попадать, но оставим на всякий случай
+        # Добавляем финальное обращение
+        message += "Коллеги, обратите внимание на задачи!"
         
-        # Формируем сообщение (без Markdown)
-        hours_left = task['hours_until_due']
-        time_str = self._format_time(hours_left)
-        sla_status = self._get_sla_status(hours_left)
-        
-        message = (
-            f"⚠️ Внимание! Приближается SLA!\n\n"
-            f"📌 Задача: {task['id']}\n"
-            f"🔗 Ссылка: {task['url']}\n"
-            f"📋 Название: {task['title']}\n"
-            f"👤 Исполнитель: {mention}\n"
-            f"⏰ Дедлайн: {task['due_date'].strftime('%d.%m.%Y %H:%M')}\n"
-            f"⌛ Осталось: {time_str}\n"
-            f"📊 {sla_status}\n"
-            f"📈 Статус: {task['status']}\n"
-            f"🎯 Приоритет: {task['priority'] or 'Не указан'}\n\n"
-            f"Обрати внимание на задачу!"
-        )
-        
+        # Отправляем одно общее сообщение
         try:
             await self.bot.send_message(
                 chat_id=self.chat_id,
                 text=message,
                 disable_web_page_preview=True
             )
-            
-            if employee:
-                logger.info(f"✅ Уведомление для {task_id} -> {employee['telegram_username']}")
-            else:
-                logger.info(f"✅ Уведомление для {task_id} -> {task['assignee']} (не в базе)")
-            
-            self.notified_tasks.add(task_id)
+            logger.info(f"✅ Отправлено общее уведомление с {len(tasks)} задачами")
             
         except TelegramError as e:
-            logger.error(f"❌ Ошибка отправки: {e}")
+            logger.error(f"❌ Ошибка отправки общего уведомления: {e}")
+    
+    async def send_notification(self, task: Dict[str, Any]):
+        """Отправляет уведомление о задаче (оставлено для совместимости)"""
+        # Этот метод больше не используется для автопроверки,
+        # но может пригодиться для тестов
+        await self.send_bulk_notification([task])
     
     def _format_time(self, hours: float) -> str:
         """Форматирует время до дедлайна"""
@@ -208,7 +226,7 @@ class SLABot:
                     "assignee_raw": assignee_data,  # Оригинальные данные
                     "due_date": due_date,
                     "hours_until_due": hours_until_due,
-                    "should_notify": 0 < hours_until_due <= config.SLA_HOURS,
+                    "should_notify": hours_until_due <= config.SLA_HOURS,
                     "status": fields.get('status', {}).get('name') if fields.get('status') else 'Неизвестно',
                     "status_id": fields.get('status', {}).get('id') if fields.get('status') else None,
                     "priority": fields.get('priority', {}).get('name') if fields.get('priority') else None,
@@ -255,7 +273,7 @@ class SLABot:
                             text=(
                                 "✅ Бот мониторинга SLA\n\n"
                                 "📋 Доступные команды:\n"
-                                "/alarm - показать все задачи с истекающим SLA\n"
+                                "/check_all - показать все задачи с истекающим SLA\n"
                                 "/checking_dep - показать задачи только сотрудников отдела\n"
                                 "/check - проверить конкретную задачу (Например: /check ZZ-123456)"
                             )
@@ -264,7 +282,7 @@ class SLABot:
                     elif base_command == '/help':
                         help_text = (
                             "🤖 Команды бота:\n\n"
-                            "/alarm - показать все задачи с истекающим SLA\n"
+                            "/check_all - показать все задачи с истекающим SLA\n"
                             "/checking_dep - показать задачи только сотрудников отдела\n"
                             "/check - проверить конкретную задачу (Например: /check ZZ-12345)"
                         )
@@ -273,46 +291,57 @@ class SLABot:
                             text=help_text
                         )
                     
-                    elif base_command == '/alarm':
+                    elif base_command == '/check_all':
                         await self.bot.send_message(
                             chat_id=chat_id,
-                            text="🔍 Проверяю все задачи с истекающим SLA..."
+                            text="🔍 Формирую общий отчёт по задачам с истекающим SLA..."
                         )
                         
                         # Получаем задачи
                         tasks = await self.api_client.get_tasks()
-                        urgent_tasks = [t for t in tasks if t.get('should_notify', False)]
                         
-                        if not urgent_tasks:
+                        # Фильтруем задачи: только те, где исполнитель есть в базе
+                        employee_tasks = []
+                        for task in tasks:
+                            employee = find_employee_by_name(task['assignee'])
+                            if employee:  # Если сотрудник найден в базе
+                                employee_tasks.append(task)
+                        
+                        # Из них отбираем те, что требуют уведомления
+                        tasks_to_notify = [t for t in employee_tasks if t.get('should_notify', False)]
+                        
+                        if not tasks_to_notify:
                             await self.bot.send_message(
                                 chat_id=chat_id,
-                                text="✅ Нет задач с истекающим SLA (в ближайшие 24 часа)"
+                                text="✅ Нет задач с истекающим SLA"
                             )
                             continue
                         
-                        # Формируем сообщение СО ВСЕМИ задачами
-                        msg = f"⚠️ Найдено задач с истекающим SLA: {len(urgent_tasks)}\n\n"
+                        # Сортируем по времени до дедлайна
+                        tasks_to_notify.sort(key=lambda x: x['hours_until_due'])
                         
-                        # Сортируем по времени до дедлайна (сначала самые срочные)
-                        urgent_tasks.sort(key=lambda x: x['hours_until_due'])
+                        # Формируем заголовок
+                        msg = f"⚠️ *Внимание! Приближается SLA!*\n\n"
                         
-                        for task in urgent_tasks:
-                            # Форматируем исполнителя: имя из API + (тег) если есть
-                            assignee_formatted = self._format_assignee(task['assignee'])
-                            
-                            # Добавляем статус SLA
+                        for i, task in enumerate(tasks_to_notify):
+                            employee = find_employee_by_name(task['assignee'])
+                            mention = f"{task['assignee']} {employee['telegram_username']}" if employee else task['assignee']
                             sla_status = self._get_sla_status(task['hours_until_due'])
                             
                             msg += (
-                                f"📌 {task['id']}\n"
-                                f"👤 {assignee_formatted}\n"
-                                f"📋 {task['title'][:50]}...\n"
-                                f"⏰ {task['due_date'].strftime('%d.%m.%Y %H:%M')}\n"
+                                f"📌 Задача: {task['id']}\n"
+                                f"🔗 Ссылка: {task['url']}\n"
+                                f"📋 Название: {task['title']}\n"
+                                f"👤 Исполнитель: {mention}\n"
+                                f"⏰ Дедлайн: {task['due_date'].strftime('%d.%m.%Y %H:%M')}\n"
                                 f"⌛ Осталось: {self._format_time(task['hours_until_due'])}\n"
                                 f"📊 {sla_status}\n"
-                                f"📈 Статус задачи: {task['status']}\n"
-                                f"🔗 {task['url']}\n\n"
+                                f"📈 Статус: {task['status']}\n"
+                                f"🎯 Приоритет: {task['priority'] or 'Не указан'}\n\n"
                             )
+                            
+                            if i < len(tasks_to_notify) - 1:
+                                msg += f"{'—' * 45}\n\n"
                             
                             # Telegram имеет лимит на длину сообщения (4096 символов)
                             if len(msg) > 3500:
@@ -324,6 +353,7 @@ class SLABot:
                                 msg = ""
                         
                         if msg:
+                            msg += "Коллеги, обратите внимание на задачи!"
                             await self.bot.send_message(
                                 chat_id=chat_id,
                                 text=msg,
@@ -619,7 +649,7 @@ async def send_test_notification():
         "url": "https://test.ru"
     }
     
-    await bot.send_notification(test_task)
+    await bot.send_bulk_notification([test_task])
     print("✅ Тестовое уведомление отправлено!")
 
 
