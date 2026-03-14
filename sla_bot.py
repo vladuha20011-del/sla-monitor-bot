@@ -549,9 +549,9 @@ class SLABot:
             except:
                 pass
     
-    async def run_forever(self):
+        async def run_forever(self):
         """Запускает бесконечный цикл"""
-        logger.info(f"🚀 Бот запущен. Интервал проверки: 60 минут")
+        logger.info(f"🚀 Бот запущен. Интервал проверки: {config.CHECK_INTERVAL_MINUTES} минут")
         
         # Сначала получаем последний update_id
         try:
@@ -573,9 +573,9 @@ class SLABot:
         
         while self.is_running:
             try:
-                # Проверяем задачи раз в 60 минут
+                # Проверяем задачи с интервалом из config.py
                 current_minute = datetime.now().minute
-                if current_minute == 0:  # Проверка в начале каждого часа
+                if current_minute % config.CHECK_INTERVAL_MINUTES == 0:
                     await self.check_tasks()
                     await asyncio.sleep(60)  # Ждем минуту, чтобы не проверять несколько раз
                 
