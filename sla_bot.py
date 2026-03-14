@@ -549,8 +549,8 @@ class SLABot:
             except:
                 pass
     
-        async def run_forever(self):
-            """Запускает бесконечный цикл"""
+    async def run_forever(self):
+        """Запускает бесконечный цикл"""
         logger.info(f"🚀 Бот запущен. Интервал проверки: {config.CHECK_INTERVAL_MINUTES} минут")
         
         # Сначала получаем последний update_id
@@ -590,78 +590,3 @@ class SLABot:
             except Exception as e:
                 logger.error(f"❌ Ошибка в основном цикле: {e}", exc_info=True)
                 await asyncio.sleep(5)
-
-
-async def test_bot():
-    """Тестовая функция"""
-    print("\n" + "=" * 60)
-    print("🤖 ТЕСТИРОВАНИЕ SLA БОТА")
-    print("=" * 60)
-    
-    print("\n📋 Проверка конфигурации:")
-    print(f"   CHAT_ID: {config.CHAT_ID}")
-    print(f"   BOT_TOKEN: {config.BOT_TOKEN[:10]}...")
-    print(f"   SLA_HOURS: {config.SLA_HOURS}")
-    
-    bot = SLABot()
-    
-    print("\n🔍 Получаем задачи из Jira...")
-    tasks = await bot.api_client.get_tasks()
-    
-    if tasks:
-        print(f"\n✅ Получено задач: {len(tasks)}")
-        to_notify = [t for t in tasks if t.get('should_notify')]
-        print(f"⚠️ Требуют уведомления: {len(to_notify)}")
-        
-        if tasks:
-            print(f"\n📋 Пример задачи:")
-            task = tasks[0]
-            print(f"   ID: {task['id']}")
-            print(f"   Исполнитель: {task['assignee']}")
-            print(f"   Дедлайн: {task['due_date'].strftime('%d.%m.%Y %H:%M')}")
-            print(f"   Осталось: {task['hours_until_due']:.1f}ч")
-    else:
-        print("\n❌ Не удалось получить задачи")
-    
-    print("\n" + "=" * 60)
-
-
-async def send_test_notification():
-    """Отправляет тестовое уведомление"""
-    print("\n📨 ОТПРАВКА ТЕСТОВОГО УВЕДОМЛЕНИЯ")
-    
-    bot = SLABot()
-    
-    employee = find_employee_by_name("Бухвиц Владислав")
-    if not employee:
-        print("❌ Сотрудник не найден")
-        return
-    
-    test_task = {
-        "id": "TEST-001",
-        "title": "🔧 ТЕСТОВАЯ ЗАДАЧА",
-        "assignee": "Бухвиц Владислав",
-        "due_date": datetime.now() + timedelta(hours=2),
-        "hours_until_due": 2.5,
-        "status": "В работе",
-        "priority": "High",
-        "url": "https://test.ru"
-    }
-    
-    await bot._send_bulk_notification([test_task])
-    print("✅ Тестовое уведомление отправлено!")
-
-
-if __name__ == "__main__":
-    if len(sys.argv) > 1:
-        if sys.argv[1] == "--test":
-            asyncio.run(test_bot())
-        elif sys.argv[1] == "--send-test":
-            asyncio.run(send_test_notification())
-    else:
-        # Постоянная работа
-        bot = SLABot()
-        try:
-            asyncio.run(bot.run_forever())
-        except KeyboardInterrupt:
-            print("\n🛑 Бот остановлен")
