@@ -17,7 +17,7 @@ from telegram.error import TelegramError
 
 import config
 from api_client import TaskAPIClient
-from employees import find_employee_by_name, get_all_telegram_mentions
+from employees import find_employee_by_name, get_all_telegram_mentions, EMPLOYEES
 
 # Настройка логирования
 logging.basicConfig(
@@ -151,10 +151,10 @@ class SLABot:
         """Возвращает статус SLA на основе оставшегося времени"""
         if hours < 0:
             return "⚠️ ПРОСРОЧЕНО"
+        elif hours < 12:
+            return "🔴 Критично (менее 12 часов)"
         elif hours < 24:
-            return "🔴 Критично (менее 24ч)"
-        elif hours < 72:
-            return "🟡 Скоро истекает (менее 3 дней)"
+            return "🟡 Скоро истекает (менее 24 часов)"
         else:
             return "🟢 В норме"
     
@@ -245,6 +245,7 @@ class SLABot:
                                 "✅ Бот мониторинга SLA\n\n"
                                 "📋 Доступные команды:\n"
                                 "/alarm - показать все задачи с истекающим SLA\n"
+                                "/checking_dep - показать задачи только сотрудников из базы\n"
                                 "/check - проверить конкретную задачу (Например: /check ZZ-123456)"
                             )
                         )
@@ -253,6 +254,7 @@ class SLABot:
                         help_text = (
                             "🤖 Команды бота:\n\n"
                             "/alarm - показать все задачи с истекающим SLA\n"
+                            "/checking_dep - показать задачи только сотрудников из базы\n"
                             "/check - проверить конкретную задачу (Например: /check ZZ-123456)\n\n"
                             "*Команды администратора:*\n"
                             "/update - остановить бота для обновления\n"
@@ -266,7 +268,7 @@ class SLABot:
                     elif base_command == '/alarm':
                         await self.bot.send_message(
                             chat_id=chat_id,
-                            text="🔍 Проверяю задачи с истекающим SLA..."
+                            text="🔍 Проверяю все задачи с истекающим SLA..."
                         )
                         
                         # Получаем задачи
@@ -286,7 +288,7 @@ class SLABot:
                         # Сортируем по времени до дедлайна (сначала самые срочные)
                         urgent_tasks.sort(key=lambda x: x['hours_until_due'])
                         
-                        for task in urgent_tasks:  # Показываем ВСЕ задачи
+                        for task in urgent_tasks:
                             # Форматируем исполнителя: имя из API + (тег) если есть
                             assignee_formatted = self._format_assignee(task['assignee'])
                             
@@ -311,9 +313,78 @@ class SLABot:
                                     text=msg,
                                     disable_web_page_preview=True
                                 )
-                                msg = ""  # Начинаем новое сообщение
+                                msg = ""
                         
-                        # Отправляем остаток сообщения, если он есть
+                        if msg:
+                            await self.bot.send_message(
+                                chat_id=chat_id,
+                                text=msg,
+                                disable_web_page_preview=True
+                            )
+                    
+                    elif base_command == '/checking_dep':
+                        await self.bot.send_message(
+                            chat_id=chat_id,
+                            text="🔍 Проверяю задачи только сотрудников из базы..."
+                        )
+                        
+                        # Получаем задачи
+                        tasks = await self.api_client.get_tasks()
+                        
+                        # Фильтруем задачи только тех, чьи исполнители есть в EMPLOYEES
+                        dep_tasks = []
+                        for task in tasks:
+                            employee = find_employee_by_name(task['assignee'])
+                            if employee:  # Если сотрудник найден в базе
+                                dep_tasks.append(task)
+                        
+                        if not dep_tasks:
+                            await self.bot.send_message(
+                                chat_id=chat_id,
+                                text="✅ Нет задач у сотрудников из базы"
+                            )
+                            continue
+                        
+                        # Фильтруем задачи с истекающим SLA
+                        urgent_dep_tasks = [t for t in dep_tasks if t.get('should_notify', False)]
+                        
+                        if not urgent_dep_tasks:
+                            await self.bot.send_message(
+                                chat_id=chat_id,
+                                text="✅ У сотрудников из базы нет задач с истекающим SLA"
+                            )
+                            continue
+                        
+                        # Формируем сообщение
+                        msg = f"⚠️ Найдено задач у сотрудников из базы: {len(urgent_dep_tasks)}\n\n"
+                        
+                        # Сортируем по времени до дедлайна
+                        urgent_dep_tasks.sort(key=lambda x: x['hours_until_due'])
+                        
+                        for task in urgent_dep_tasks:
+                            employee = find_employee_by_name(task['assignee'])
+                            assignee_formatted = f"{task['assignee']} {employee['telegram_username']}"
+                            sla_status = self._get_sla_status(task['hours_until_due'])
+                            
+                            msg += (
+                                f"📌 {task['id']}\n"
+                                f"👤 {assignee_formatted}\n"
+                                f"📋 {task['title'][:50]}...\n"
+                                f"⏰ {task['due_date'].strftime('%d.%m.%Y %H:%M')}\n"
+                                f"⌛ Осталось: {self._format_time(task['hours_until_due'])}\n"
+                                f"📊 {sla_status}\n"
+                                f"📈 Статус задачи: {task['status']}\n"
+                                f"🔗 {task['url']}\n\n"
+                            )
+                            
+                            if len(msg) > 3500:
+                                await self.bot.send_message(
+                                    chat_id=chat_id,
+                                    text=msg,
+                                    disable_web_page_preview=True
+                                )
+                                msg = ""
+                        
                         if msg:
                             await self.bot.send_message(
                                 chat_id=chat_id,
@@ -362,7 +433,7 @@ class SLABot:
                         hours = task['hours_until_due']
                         sla_status = self._get_sla_status(hours)
                         
-                        # Формируем сообщение (email УБРАН, добавлен статус SLA)
+                        # Формируем сообщение
                         task_info = (
                             f"📌 Задача: {task['id']}\n"
                             f"📋 Название: {task['title']}\n"
@@ -399,7 +470,6 @@ class SLABot:
                         )
                         logger.info(f"🛑 Останавливаем бота по команде от администратора {user_id}")
                         self.is_running = False
-                        # Даем время на отправку сообщения
                         await asyncio.sleep(2)
                         sys.exit(0)
                     
@@ -444,7 +514,7 @@ class SLABot:
     
     async def run_forever(self):
         """Запускает бесконечный цикл"""
-        logger.info(f"🚀 Бот запущен. Интервал проверки: {config.CHECK_INTERVAL_MINUTES} минут")
+        logger.info(f"🚀 Бот запущен. Интервал проверки: 30 минут")
         
         # Сначала получаем последний update_id
         try:
@@ -466,17 +536,15 @@ class SLABot:
         
         while self.is_running:
             try:
-                # Проверяем задачи (раз в CHECK_INTERVAL_MINUTES минут)
+                # Проверяем задачи раз в 30 минут
                 current_minute = datetime.now().minute
-                if current_minute % config.CHECK_INTERVAL_MINUTES == 0:
+                if current_minute % 30 == 0:  # Проверка каждые 30 минут
                     await self.check_tasks()
-                    # Ждем минуту, чтобы не проверять несколько раз в одну минуту
-                    await asyncio.sleep(60)
+                    await asyncio.sleep(60)  # Ждем минуту, чтобы не проверять несколько раз
                 
                 # Обрабатываем команды (каждую секунду)
                 await self.handle_updates()
                 
-                # Небольшая задержка
                 await asyncio.sleep(1)
                 
             except KeyboardInterrupt:
