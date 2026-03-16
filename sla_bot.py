@@ -131,20 +131,40 @@ class SLABot:
             return
         
         # Проверяем текущее время (МСК)
-        current_hour = datetime.now().hour
+        now = datetime.now()
+        current_hour = now.hour
+        current_weekday = now.weekday()  # 0-6 (пн-вс)
         
         # Проверяем, можно ли тегать
         should_mention = config.TAG_ENABLED
+        
         if should_mention:
-            if current_hour < config.TAG_START_HOUR or current_hour >= config.TAG_END_HOUR:
-                should_mention = False
+            # Проверка по времени суток
+            time_ok = current_hour >= config.TAG_START_HOUR and current_hour < config.TAG_END_HOUR
+            
+            # Проверка по дням недели (если включено)
+            day_ok = True
+            if config.TAG_WORKDAYS_ONLY:
+                day_ok = current_weekday < 5  # пн-пт = 0-4
+            
+            should_mention = time_ok and day_ok
+            
+            if not time_ok:
                 logger.info(f"⏰ Теги отключены по времени: {current_hour}ч (рабочие часы {config.TAG_START_HOUR}-{config.TAG_END_HOUR})")
+            elif not day_ok:
+                logger.info(f"📅 Теги отключены по дню недели: {current_weekday} (рабочие дни пн-пт)")
         
         # Формируем заголовок
         if should_mention:
             message = "⚠️ Внимание! Приближается SLA!\n\n"
         else:
-            message = f"⚠️ Внимание! Приближается SLA! (теги отключены с {config.TAG_END_HOUR}:00 до {config.TAG_START_HOUR}:00)\n\n"
+            # Определяем причину отключения тегов
+            if config.TAG_WORKDAYS_ONLY and current_weekday >= 5:
+                day_text = "выходной день"
+            else:
+                day_text = f"нерабочее время ({config.TAG_END_HOUR}:00-{config.TAG_START_HOUR}:00)"
+            
+            message = f"⚠️ Внимание! Приближается SLA! (теги отключены — {day_text})\n\n"
         
         for i, task in enumerate(tasks):
             # Находим сотрудника по имени
