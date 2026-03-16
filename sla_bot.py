@@ -439,10 +439,7 @@ class SLABot:
                             "🤖 Команды бота:\n\n"
                             "/alarm - показать новые задачи с истекающим SLA\n"
                             "/checking_dep - сформировать Excel отчёт по задачам отдела\n"
-                            "/check - проверить конкретную задачу (Например: /check ZZ-12345)\n\n"
-                            "*Команды администратора:*\n"
-                            "/update - остановить бота для обновления\n"
-                            "/restart - перезапустить бота"
+                            "/check - проверить конкретную задачу (Например: /check ZZ-12345)"
                         )
                         await self.bot.send_message(
                             chat_id=chat_id,
@@ -494,7 +491,7 @@ class SLABot:
                     elif base_command == '/checking_dep':
                         await self.bot.send_message(
                             chat_id=chat_id,
-                            text="📊 Формирую Excel отчёт по задачам отдела..."
+                            text="📊 Формирую Excel отчёт по задачам..."
                         )
                         
                         # Получаем задачи
@@ -524,7 +521,7 @@ class SLABot:
                         await self.bot.send_document(
                             chat_id=chat_id,
                             document=InputFile(excel_file, filename=excel_file.name),
-                            caption=f"📊 Отчёт по задачам отдела (всего: {len(dep_tasks)})"
+                            caption=f"📊 Отчёт по задачам (всего: {len(dep_tasks)})"
                         )
                         
                         logger.info(f"✅ Отправлен Excel отчёт с {len(dep_tasks)} задачами")
