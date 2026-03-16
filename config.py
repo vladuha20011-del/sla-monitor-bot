@@ -33,3 +33,4 @@ DEBUG_MODE = True
 TAG_START_HOUR = 9      # (МСК)
 TAG_END_HOUR = 18       # (МСК)
 TAG_ENABLED = True      # Включить/выключить теги
+TAG_WORKDAYS_ONLY = True    # Тегать только по будням
