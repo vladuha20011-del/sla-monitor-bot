@@ -8,12 +8,17 @@ import logging
 import sys
 import os
 import re
+import io
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
 
-from telegram import Bot, Update, ChatMember
+from telegram import Bot, Update, ChatMember, InputFile
 from telegram.constants import ParseMode
 from telegram.error import TelegramError
+
+# Для Excel отчётов
+from openpyxl import Workbook
+from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 
 import config
 from api_client import TaskAPIClient
@@ -50,6 +55,23 @@ class SLABot:
             return chat_member.status in [ChatMember.ADMINISTRATOR, ChatMember.OWNER]
         except Exception as e:
             logger.error(f"Ошибка при проверке прав администратора: {e}")
+            return False
+    
+    async def is_allowed_chat(self, chat_id: int) -> bool:
+        """
+        Проверяет, разрешено ли использовать бота в этом чате
+        Запрещает личные сообщения, разрешает только групповой чат
+        """
+        try:
+            chat = await self.bot.get_chat(chat_id)
+            # Разрешаем только групповые чаты (type = 'group' или 'supergroup')
+            if chat.type in ['group', 'supergroup']:
+                return True
+            else:
+                logger.warning(f"Запрещённый чат: {chat_id} (тип: {chat.type})")
+                return False
+        except Exception as e:
+            logger.error(f"Ошибка при проверке типа чата: {e}")
             return False
     
     async def check_tasks(self):
@@ -181,6 +203,81 @@ class SLABot:
             except TelegramError as e:
                 logger.error(f"❌ Ошибка отправки общего уведомления: {e}")
     
+    async def _generate_excel_report(self, tasks: list) -> io.BytesIO:
+        """
+        Генерирует Excel файл с отчётом по задачам
+        """
+        # Создаём книгу и активный лист
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "SLA Отчёт"
+        
+        # Заголовки
+        headers = [
+            'ID задачи',
+            'Название',
+            'Исполнитель',
+            'Telegram',
+            'Дедлайн',
+            'Осталось (часов)',
+            'Статус SLA',
+            'Статус задачи',
+            'Приоритет',
+            'Ссылка'
+        ]
+        
+        # Стили для заголовков
+        header_font = Font(bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+        header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        
+        # Записываем заголовки
+        for col, header in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_alignment
+        
+        # Данные
+        for row, task in enumerate(tasks, 2):
+            employee = find_employee_by_name(task['assignee'])
+            telegram = employee['telegram_username'] if employee else 'Не найден'
+            hours = task['hours_until_due']
+            
+            # Определяем статус SLA для Excel (без эмодзи)
+            if hours < 0:
+                sla_status = "ПРОСРОЧЕНО"
+            elif hours < 12:
+                sla_status = "Критично"
+            elif hours < 24:
+                sla_status = "Скоро истекает"
+            else:
+                sla_status = "В норме"
+            
+            # Записываем данные
+            ws.cell(row=row, column=1, value=task['id'])
+            ws.cell(row=row, column=2, value=task['title'])
+            ws.cell(row=row, column=3, value=task['assignee'])
+            ws.cell(row=row, column=4, value=telegram)
+            ws.cell(row=row, column=5, value=task['due_date'].strftime('%d.%m.%Y %H:%M'))
+            ws.cell(row=row, column=6, value=round(hours, 1))
+            ws.cell(row=row, column=7, value=sla_status)
+            ws.cell(row=row, column=8, value=task['status'])
+            ws.cell(row=row, column=9, value=task['priority'] or 'Не указан')
+            ws.cell(row=row, column=10, value=task['url'])
+        
+        # Автоширина колонок
+        for col in range(1, 11):
+            ws.column_dimensions[chr(64 + col)].width = 20
+        
+        # Сохраняем в BytesIO
+        excel_bytes = io.BytesIO()
+        wb.save(excel_bytes)
+        excel_bytes.seek(0)
+        excel_bytes.name = f"sla_report_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+        
+        return excel_bytes
+    
     def _format_time(self, hours: float) -> str:
         """Форматирует время до дедлайна"""
         if hours < 0:
@@ -275,6 +372,14 @@ class SLABot:
                     chat_id = update.message.chat_id
                     user_id = update.message.from_user.id
                     
+                    # ПРОВЕРКА: запрещаем личные сообщения
+                    if not await self.is_allowed_chat(chat_id):
+                        await self.bot.send_message(
+                            chat_id=chat_id,
+                            text="❌ Бот работает только в групповых чатах. Личные сообщения запрещены."
+                        )
+                        continue
+                    
                     # Разбираем команду и аргументы
                     parts = text.split()
                     full_command = parts[0].lower()
@@ -294,8 +399,7 @@ class SLABot:
                             text=(
                                 "✅ Бот мониторинга SLA\n\n"
                                 "📋 Доступные команды:\n"
-                                "/alarm - показать новые задачи с истекающим SLA\n"
-                                "/checking_dep - показать задачи только сотрудников отдела\n"
+                                "/checking_dep - сформировать Excel отчёт по задачам отдела\n"
                                 "/check - проверить конкретную задачу (Например: /check ZZ-123456)"
                             )
                         )
@@ -303,8 +407,7 @@ class SLABot:
                     elif base_command == '/help':
                         help_text = (
                             "🤖 Команды бота:\n\n"
-                            "/alarm - показать новые задачи с истекающим SLA\n"
-                            "/checking_dep - показать задачи только сотрудников отдела\n"
+                            "/checking_dep - сформировать Excel отчёт по задачам отдела\n"
                             "/check - проверить конкретную задачу (Например: /check ZZ-12345)"
                         )
                         await self.bot.send_message(
@@ -357,7 +460,7 @@ class SLABot:
                     elif base_command == '/checking_dep':
                         await self.bot.send_message(
                             chat_id=chat_id,
-                            text="🔍 Проверяю задачи только сотрудников отдела..."
+                            text="📊 Формирую Excel отчёт по задачам отдела..."
                         )
                         
                         # Получаем задачи
@@ -377,57 +480,20 @@ class SLABot:
                             )
                             continue
                         
-                        # Фильтруем задачи с истекающим SLA
-                        urgent_dep_tasks = [t for t in dep_tasks if t.get('should_notify', False)]
-                        
-                        if not urgent_dep_tasks:
-                            await self.bot.send_message(
-                                chat_id=chat_id,
-                                text="✅ У сотрудников отдела нет задач с истекающим SLA"
-                            )
-                            continue
-                        
-                        # Формируем сообщение
-                        msg = f"⚠️ Найдено задач у сотрудников отдела: {len(urgent_dep_tasks)}\n\n"
-                        
                         # Сортируем по времени до дедлайна
-                        urgent_dep_tasks.sort(key=lambda x: x['hours_until_due'])
+                        dep_tasks.sort(key=lambda x: x['hours_until_due'])
                         
-                        for i, task in enumerate(urgent_dep_tasks):
-                            employee = find_employee_by_name(task['assignee'])
-                            assignee_formatted = f"{task['assignee']} {employee['telegram_username']}"
-                            sla_status = self._get_sla_status(task['hours_until_due'])
-                            
-                            msg += (
-                                f"📌 Задача: {task['id']}\n"
-                                f"🔗 Ссылка: {task['url']}\n"
-                                f"📋 Название: {task['title']}\n"
-                                f"👤 Исполнитель: {assignee_formatted}\n"
-                                f"⏰ Дедлайн: {task['due_date'].strftime('%d.%m.%Y %H:%M')}\n"
-                                f"⌛ Осталось: {self._format_time(task['hours_until_due'])}\n"
-                                f"📊 {sla_status}\n"
-                                f"📈 Статус задачи: {task['status']}\n"
-                                f"🎯 Приоритет: {task['priority'] or 'Не указан'}\n\n"
-                            )
-                            
-                            if i < len(urgent_dep_tasks) - 1:
-                                msg += f"{'—' * 45}\n\n"
-                            
-                            if len(msg) > 3500:
-                                await self.bot.send_message(
-                                    chat_id=chat_id,
-                                    text=msg,
-                                    disable_web_page_preview=True
-                                )
-                                msg = ""
+                        # Генерируем Excel файл
+                        excel_file = await self._generate_excel_report(dep_tasks)
                         
-                        if msg:
-                            msg += "Коллеги, обратите внимание на задачи!"
-                            await self.bot.send_message(
-                                chat_id=chat_id,
-                                text=msg,
-                                disable_web_page_preview=True
-                            )
+                        # Отправляем файл
+                        await self.bot.send_document(
+                            chat_id=chat_id,
+                            document=InputFile(excel_file, filename=excel_file.name),
+                            caption=f"📊 Отчёт по задачам отдела (всего: {len(dep_tasks)})"
+                        )
+                        
+                        logger.info(f"✅ Отправлен Excel отчёт с {len(dep_tasks)} задачами")
                     
                     elif base_command == '/check':
                         # Проверяем, есть ли аргумент (номер задачи)
@@ -536,7 +602,7 @@ class SLABot:
                         # Неизвестная команда
                         await self.bot.send_message(
                             chat_id=chat_id,
-                            text="❌ Неизвестная команда\n\nНапишите /help для списка команд"
+                            text="❌ Неизвестная команда"
                         )
                         
         except Exception as e:
@@ -566,7 +632,7 @@ class SLABot:
         try:
             await self.bot.send_message(
                 chat_id=self.chat_id,
-                text="🚀 Бот мониторинга SLA запущен\n\nИспользуйте /help для списка команд"
+                text="🚀 Бот мониторинга SLA запущен"
             )
         except:
             pass
