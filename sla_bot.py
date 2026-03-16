@@ -164,7 +164,7 @@ class SLABot:
             else:
                 day_text = f"нерабочее время ({config.TAG_END_HOUR}:00-{config.TAG_START_HOUR}:00)"
             
-            message = f"⚠️ Внимание! Приближается SLA! (теги отключены — {day_text})\n\n"
+            message = f"⚠️ Внимание! Приближается SLA!\n\n"
         
         for i, task in enumerate(tasks):
             # Находим сотрудника по имени
@@ -214,7 +214,7 @@ class SLABot:
                     disable_web_page_preview=True
                 )
                 # Начинаем новое сообщение
-                message = "⚠️ Внимание! Приближается SLA! (продолжение)\n\n"
+                message = "⚠️ Внимание! Приближается SLA!\n\n"
         
         # Добавляем финальное обращение, если его ещё нет
         if message and not message.endswith("Коллеги, обратите внимание на задачи!"):
