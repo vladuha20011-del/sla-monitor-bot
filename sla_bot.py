@@ -126,23 +126,32 @@ class SLABot:
     async def _send_bulk_notification(self, tasks: list, is_manual: bool = False):
         """
         Отправляет одно общее уведомление со всеми задачами
-        
-        Args:
-            tasks: список задач
-            is_manual: True если вызвано вручную (не добавляем в notified_tasks)
         """
         if not tasks:
             return
         
+        # Проверяем текущее время (МСК)
+        current_hour = datetime.now().hour
+        
+        # Проверяем, можно ли тегать
+        should_mention = config.TAG_ENABLED
+        if should_mention:
+            if current_hour < config.TAG_START_HOUR or current_hour >= config.TAG_END_HOUR:
+                should_mention = False
+                logger.info(f"⏰ Теги отключены по времени: {current_hour}ч (рабочие часы {config.TAG_START_HOUR}-{config.TAG_END_HOUR})")
+        
         # Формируем заголовок
-        message = "⚠️ Внимание! Приближается SLA!\n\n"
+        if should_mention:
+            message = "⚠️ Внимание! Приближается SLA!\n\n"
+        else:
+            message = f"⚠️ Внимание! Приближается SLA! (теги отключены с {config.TAG_END_HOUR}:00 до {config.TAG_START_HOUR}:00)\n\n"
         
         for i, task in enumerate(tasks):
             # Находим сотрудника по имени
             employee = find_employee_by_name(task['assignee'])
             
             # Формируем упоминание исполнителя
-            if employee:
+            if employee and should_mention:
                 mention = f"{task['assignee']} {employee['telegram_username']}"
             else:
                 mention = f"{task['assignee']}"
@@ -399,6 +408,7 @@ class SLABot:
                             text=(
                                 "✅ Бот мониторинга SLA\n\n"
                                 "📋 Доступные команды:\n"
+                                "/alarm - показать новые задачи с истекающим SLA\n"
                                 "/checking_dep - сформировать Excel отчёт по задачам отдела\n"
                                 "/check - проверить конкретную задачу (Например: /check ZZ-123456)"
                             )
@@ -407,8 +417,12 @@ class SLABot:
                     elif base_command == '/help':
                         help_text = (
                             "🤖 Команды бота:\n\n"
+                            "/alarm - показать новые задачи с истекающим SLA\n"
                             "/checking_dep - сформировать Excel отчёт по задачам отдела\n"
-                            "/check - проверить конкретную задачу (Например: /check ZZ-12345)"
+                            "/check - проверить конкретную задачу (Например: /check ZZ-12345)\n\n"
+                            "*Команды администратора:*\n"
+                            "/update - остановить бота для обновления\n"
+                            "/restart - перезапустить бота"
                         )
                         await self.bot.send_message(
                             chat_id=chat_id,
@@ -602,7 +616,7 @@ class SLABot:
                         # Неизвестная команда
                         await self.bot.send_message(
                             chat_id=chat_id,
-                            text="❌ Неизвестная команда"
+                            text="❌ Неизвестная команда\n\nНапишите /help для списка команд"
                         )
                         
         except Exception as e:
@@ -628,14 +642,7 @@ class SLABot:
         except Exception as e:
             logger.error(f"Ошибка при получении последнего update_id: {e}")
         
-        # Отправляем сообщение о запуске
-        try:
-            await self.bot.send_message(
-                chat_id=self.chat_id,
-                text="🚀 Бот мониторинга SLA запущен"
-            )
-        except:
-            pass
+        # Убрали отправку сообщения о запуске в чат
         
         while self.is_running:
             try:
