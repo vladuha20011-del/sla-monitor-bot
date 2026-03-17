@@ -49,7 +49,7 @@ EMPLOYEES = [
         "id": 5,
         "full_name": "Хасанов Ильгиз Раушанович",
         "search_names": ["хасанов", "ильгиз"],
-        "telegram_username": "@DoniKor",
+        "telegram_username": "@Don1Kor",
         "email": "hasanov-ir@sbertroika.ru"
     },
     
