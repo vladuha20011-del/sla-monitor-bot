@@ -172,12 +172,28 @@ class SLABot:
             time_str = self._format_time(hours_left)
             sla_status = self._get_sla_status(hours_left)
             
+            # Форматируем дату создания
+            created_date = "неизвестно"
+            if 'created' in task and task['created']:
+                try:
+                    # Парсим дату создания из Jira
+                    created_str = task['created']
+                    # Убираем часовой пояс и лишние символы
+                    if 'T' in created_str:
+                        created_str = created_str.split('+')[0].split('.')[0]
+                        created_dt = datetime.strptime(created_str, '%Y-%m-%dT%H:%M:%S')
+                        created_date = created_dt.strftime('%d.%m.%Y %H:%M')
+                except Exception as e:
+                    logger.debug(f"Ошибка парсинга даты создания {task['created']}: {e}")
+                    created_date = str(task['created'])[:16]
+            
             # Добавляем задачу в общее сообщение
             message += (
                 f"📌 Задача: {task['id']}\n"
                 f"🔗 Ссылка: {task['url']}\n"
                 f"📋 Название: {task['title']}\n"
                 f"👤 Исполнитель: {mention}\n"
+                f"📅 Создана: {created_date}\n"
                 f"⏰ Дедлайн: {task['due_date'].strftime('%d.%m.%Y %H:%M')}\n"
                 f"⌛ Осталось: {time_str}\n"
                 f"📊 {sla_status}\n"
@@ -238,6 +254,7 @@ class SLABot:
             'Название',
             'Исполнитель',
             'Telegram',
+            'Дата создания',
             'Дедлайн',
             'Осталось (часов)',
             'Статус SLA',
@@ -264,6 +281,18 @@ class SLABot:
             telegram = employee['telegram_username'] if employee else 'Не найден'
             hours = task['hours_until_due']
             
+            # Форматируем дату создания
+            created_date = "неизвестно"
+            if 'created' in task and task['created']:
+                try:
+                    created_str = task['created']
+                    if 'T' in created_str:
+                        created_str = created_str.split('+')[0].split('.')[0]
+                        created_dt = datetime.strptime(created_str, '%Y-%m-%dT%H:%M:%S')
+                        created_date = created_dt.strftime('%d.%m.%Y %H:%M')
+                except:
+                    created_date = str(task['created'])[:16]
+            
             # Определяем статус SLA для Excel (без эмодзи)
             if hours < 0:
                 sla_status = "ПРОСРОЧЕНО"
@@ -279,15 +308,16 @@ class SLABot:
             ws.cell(row=row, column=2, value=task['title'])
             ws.cell(row=row, column=3, value=task['assignee'])
             ws.cell(row=row, column=4, value=telegram)
-            ws.cell(row=row, column=5, value=task['due_date'].strftime('%d.%m.%Y %H:%M'))
-            ws.cell(row=row, column=6, value=round(hours, 1))
-            ws.cell(row=row, column=7, value=sla_status)
-            ws.cell(row=row, column=8, value=task['status'])
-            ws.cell(row=row, column=9, value=task['priority'] or 'Не указан')
-            ws.cell(row=row, column=10, value=task['url'])
+            ws.cell(row=row, column=5, value=created_date)
+            ws.cell(row=row, column=6, value=task['due_date'].strftime('%d.%m.%Y %H:%M'))
+            ws.cell(row=row, column=7, value=round(hours, 1))
+            ws.cell(row=row, column=8, value=sla_status)
+            ws.cell(row=row, column=9, value=task['status'])
+            ws.cell(row=row, column=10, value=task['priority'] or 'Не указан')
+            ws.cell(row=row, column=11, value=task['url'])
         
         # Автоширина колонок
-        for col in range(1, 11):
+        for col in range(1, 12):
             ws.column_dimensions[chr(64 + col)].width = 20
         
         # Сохраняем в BytesIO
@@ -369,7 +399,8 @@ class SLABot:
                     "status_id": fields.get('status', {}).get('id') if fields.get('status') else None,
                     "priority": fields.get('priority', {}).get('name') if fields.get('priority') else None,
                     "url": f"{self.api_client.base_url}/browse/{task_data.get('key')}",
-                    "due_date_source": sla_source
+                    "due_date_source": sla_source,
+                    "created": fields.get('created')  # Добавляем дату создания
                 }
                 return task
             
@@ -554,6 +585,18 @@ class SLABot:
                         # Форматируем исполнителя: имя из API + (тег) если есть
                         assignee_formatted = self._format_assignee(task['assignee'])
                         
+                        # Форматируем дату создания
+                        created_date = "неизвестно"
+                        if 'created' in task and task['created']:
+                            try:
+                                created_str = task['created']
+                                if 'T' in created_str:
+                                    created_str = created_str.split('+')[0].split('.')[0]
+                                    created_dt = datetime.strptime(created_str, '%Y-%m-%dT%H:%M:%S')
+                                    created_date = created_dt.strftime('%d.%m.%Y %H:%M')
+                            except:
+                                created_date = str(task['created'])[:16]
+                        
                         # Получаем статус SLA
                         hours = task['hours_until_due']
                         sla_status = self._get_sla_status(hours)
@@ -564,6 +607,7 @@ class SLABot:
                             f"📋 Название: {task['title']}\n"
                             f"🔗 Ссылка: {task['url']}\n\n"
                             f"👤 Исполнитель: {assignee_formatted}\n"
+                            f"📅 Создана: {created_date}\n"
                             f"⏰ Дедлайн: {task['due_date'].strftime('%d.%m.%Y %H:%M')}\n"
                             f"⌛ Осталось: {self._format_time(hours)}\n"
                             f"📊 {sla_status}\n"
@@ -726,7 +770,8 @@ async def send_test_notification():
         "hours_until_due": 2.5,
         "status": "В работе",
         "priority": "High",
-        "url": "https://test.ru"
+        "url": "https://test.ru",
+        "created": datetime.now().isoformat()
     }
     
     await bot._send_bulk_notification([test_task])
