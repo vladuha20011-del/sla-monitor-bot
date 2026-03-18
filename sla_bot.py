@@ -241,92 +241,102 @@ class SLABot:
     
     async def _generate_excel_report(self, tasks: list) -> io.BytesIO:
         """
-        Генерирует Excel файл с отчётом по задачам
+        Генерирует Excel файл с отчётом по задачам (оптимизированная версия)
         """
-        # Создаём книгу и активный лист
-        wb = Workbook()
-        ws = wb.active
-        ws.title = "SLA Отчёт"
+        if not tasks:
+            # Создаём пустой отчёт, если нет задач
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "SLA Отчёт"
+            ws.cell(row=1, column=1, value="Нет задач для отображения")
+            excel_bytes = io.BytesIO()
+            wb.save(excel_bytes)
+            excel_bytes.seek(0)
+            excel_bytes.name = f"sla_report_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+            return excel_bytes
         
-        # Заголовки
-        headers = [
-            'ID задачи',
-            'Название',
-            'Исполнитель',
-            'Telegram',
-            'Дата создания',
-            'Дедлайн',
-            'Осталось (часов)',
-            'Статус SLA',
-            'Статус задачи',
-            'Приоритет',
-            'Ссылка'
-        ]
-        
-        # Стили для заголовков
-        header_font = Font(bold=True, color="FFFFFF")
-        header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
-        header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        
-        # Записываем заголовки
-        for col, header in enumerate(headers, 1):
-            cell = ws.cell(row=1, column=col, value=header)
-            cell.font = header_font
-            cell.fill = header_fill
-            cell.alignment = header_alignment
-        
-        # Данные
-        for row, task in enumerate(tasks, 2):
-            employee = find_employee_by_name(task['assignee'])
-            telegram = employee['telegram_username'] if employee else 'Не найден'
-            hours = task['hours_until_due']
+        try:
+            # Создаём книгу и активный лист
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "SLA Отчёт"
             
-            # Форматируем дату создания
-            created_date = "неизвестно"
-            if 'created' in task and task['created']:
-                try:
-                    created_str = task['created']
-                    if 'T' in created_str:
-                        created_str = created_str.split('+')[0].split('.')[0]
-                        created_dt = datetime.strptime(created_str, '%Y-%m-%dT%H:%M:%S')
-                        created_date = created_dt.strftime('%d.%m.%Y %H:%M')
-                except:
-                    created_date = str(task['created'])[:16]
+            # Заголовки (сократил для экономии места)
+            headers = [
+                'ID', 'Название', 'Исполнитель', 'Telegram', 'Создана',
+                'Дедлайн', 'Ост.(ч)', 'Статус SLA', 'Статус', 'Приоритет', 'Ссылка'
+            ]
             
-            # Определяем статус SLA для Excel (без эмодзи)
-            if hours < 0:
-                sla_status = "ПРОСРОЧЕНО"
-            elif hours < 12:
-                sla_status = "Критично"
-            elif hours < 24:
-                sla_status = "Скоро истекает"
-            else:
-                sla_status = "В норме"
+            # Простые заголовки без сложного форматирования (для скорости)
+            for col, header in enumerate(headers, 1):
+                ws.cell(row=1, column=col, value=header)
             
-            # Записываем данные
-            ws.cell(row=row, column=1, value=task['id'])
-            ws.cell(row=row, column=2, value=task['title'])
-            ws.cell(row=row, column=3, value=task['assignee'])
-            ws.cell(row=row, column=4, value=telegram)
-            ws.cell(row=row, column=5, value=created_date)
-            ws.cell(row=row, column=6, value=task['due_date'].strftime('%d.%m.%Y %H:%M'))
-            ws.cell(row=row, column=7, value=round(hours, 1))
-            ws.cell(row=row, column=8, value=sla_status)
-            ws.cell(row=row, column=9, value=task['status'])
-            ws.cell(row=row, column=10, value=task['priority'] or 'Не указан')
-            ws.cell(row=row, column=11, value=task['url'])
-        
-        # Автоширина колонок
-        for col in range(1, 12):
-            ws.column_dimensions[chr(64 + col)].width = 20
-        
-        # Сохраняем в BytesIO
-        excel_bytes = io.BytesIO()
-        wb.save(excel_bytes)
-        excel_bytes.seek(0)
-        excel_bytes.name = f"sla_report_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
-        
-        return excel_bytes
+            # Данные (без лишних проверок)
+            for row, task in enumerate(tasks, 2):
+                employee = find_employee_by_name(task['assignee'])
+                telegram = employee['telegram_username'] if employee else '—'
+                hours = task['hours_until_due']
+                
+                # Дата создания
+                created_date = "—"
+                if 'created' in task and task['created']:
+                    try:
+                        created_str = task['created']
+                        if 'T' in created_str:
+                            created_str = created_str.split('+')[0].split('.')[0]
+                            created_dt = datetime.strptime(created_str, '%Y-%m-%dT%H:%M:%S')
+                            created_date = created_dt.strftime('%d.%m.%Y')
+                    except:
+                        created_date = "ошибка"
+                
+                # Статус SLA
+                if hours < 0:
+                    sla_status = "ПРОСРОЧЕНО"
+                elif hours < 12:
+                    sla_status = "Критично"
+                elif hours < 24:
+                    sla_status = "Скоро"
+                else:
+                    sla_status = "Норма"
+                
+                # Записываем данные
+                ws.cell(row=row, column=1, value=task['id'])
+                ws.cell(row=row, column=2, value=task['title'][:50])  # Обрезаем длинные названия
+                ws.cell(row=row, column=3, value=task['assignee'])
+                ws.cell(row=row, column=4, value=telegram)
+                ws.cell(row=row, column=5, value=created_date)
+                ws.cell(row=row, column=6, value=task['due_date'].strftime('%d.%m.%Y'))
+                ws.cell(row=row, column=7, value=round(hours, 1))
+                ws.cell(row=row, column=8, value=sla_status)
+                ws.cell(row=row, column=9, value=task['status'][:15])  # Обрезаем длинные статусы
+                ws.cell(row=row, column=10, value=task['priority'] or '—')
+                ws.cell(row=row, column=11, value=task['url'])
+            
+            # Автоширина только для нескольких первых колонок
+            for col in range(1, 6):
+                ws.column_dimensions[chr(64 + col)].width = 15
+            ws.column_dimensions[chr(64 + 11)].width = 30  # Ссылка
+            
+            # Сохраняем
+            excel_bytes = io.BytesIO()
+            wb.save(excel_bytes)
+            excel_bytes.seek(0)
+            excel_bytes.name = f"sla_report_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+            
+            logger.info(f"✅ Excel отчёт сгенерирован за {len(tasks)} задач")
+            return excel_bytes
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка при генерации Excel: {e}")
+            # Возвращаем простой отчёт с ошибкой
+            wb = Workbook()
+            ws = wb.active
+            ws.cell(row=1, column=1, value=f"Ошибка генерации отчёта: {str(e)}")
+            excel_bytes = io.BytesIO()
+            wb.save(excel_bytes)
+            excel_bytes.seek(0)
+            excel_bytes.name = f"sla_report_error.xlsx"
+            return excel_bytes
     
     def _format_time(self, hours: float) -> str:
         """Форматирует время до дедлайна"""
