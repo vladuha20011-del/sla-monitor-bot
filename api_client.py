@@ -4,6 +4,7 @@
 Поддерживает стандартные поля и кастомные SLA поля (customfield_10611)
 """
 
+import socket
 import aiohttp
 import asyncio
 import logging
@@ -67,7 +68,10 @@ class TaskAPIClient:
             logger.info(f"📡 Запрос к Jira API: {api_endpoint}")
             logger.info(f"📋 JQL: {jql_query.strip()}")
             
-            async with aiohttp.ClientSession(timeout=self.timeout) as session:
+            # Принудительное использование IPv6
+            connector = aiohttp.TCPConnector(family=socket.AF_INET6)
+            
+            async with aiohttp.ClientSession(connector=connector, timeout=self.timeout) as session:
                 async with session.get(
                     api_endpoint, 
                     headers=headers,
@@ -317,7 +321,10 @@ class TaskAPIClient:
             
             logger.info(f"🔍 Прямой запрос задачи {task_key}")
             
-            async with aiohttp.ClientSession() as session:
+            # Принудительное использование IPv6 и для прямых запросов
+            connector = aiohttp.TCPConnector(family=socket.AF_INET6)
+            
+            async with aiohttp.ClientSession(connector=connector) as session:
                 async with session.get(url, headers=headers) as response:
                     if response.status == 200:
                         data = await response.json()
