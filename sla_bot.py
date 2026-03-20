@@ -590,18 +590,22 @@ class SLABot:
                             await self._send_bulk_notification(new_tasks, is_manual=False)
                     
                     elif base_command == '/checking_dep':
+                        logger.info("🔍 Вход в /checking_dep")
                         await self.bot.send_message(
                             chat_id=chat_id,
                             text="📊 Формирую Excel отчёт по задачам отдела..."
                         )
                         
+                        logger.info("🔍 Запрашиваем задачи из Jira")
                         tasks = await self.api_client.get_tasks()
+                        logger.info(f"🔍 Получено задач из Jira: {len(tasks)}")
                         
                         dep_tasks = []
                         for task in tasks:
                             employee = find_employee_by_name(task['assignee'])
                             if employee:
                                 dep_tasks.append(task)
+                        logger.info(f"🔍 Отфильтровано задач отдела: {len(dep_tasks)}")
                         
                         if not dep_tasks:
                             await self.bot.send_message(
@@ -611,8 +615,10 @@ class SLABot:
                             continue
                         
                         dep_tasks.sort(key=lambda x: x['hours_until_due'])
+                        logger.info(f"🔍 Задачи отсортированы, генерируем Excel")
                         
                         excel_file = await self._generate_excel_report(dep_tasks)
+                        logger.info(f"🔍 Excel сгенерирован, отправляем")
                         
                         await self.bot.send_document(
                             chat_id=chat_id,
