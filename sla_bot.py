@@ -63,19 +63,18 @@ class SLABot:
         Запрещает личные сообщения, разрешает только групповой чат
         """
         try:
-            # Используем кэш для ускорения
-            chat = await self.bot.get_chat(chat_id, read_timeout=5)
+            chat = await self.bot.get_chat(chat_id)
             if chat.type in ['group', 'supergroup']:
                 return True
             else:
                 logger.warning(f"Запрещённый чат: {chat_id} (тип: {chat.type})")
                 return False
         except Exception as e:
-            logger.debug(f"Ошибка при проверке типа чата: {e}")
+            logger.error(f"Ошибка при проверке типа чата: {e}")
             return False
     
     async def check_tasks(self):
-        """Проверяет задачи и отправляет ОДНО общее уведомление (только новые задачи)"""
+        """Проверяет задачи и отправляет уведомления (текстом или Excel)"""
         if not self.is_running:
             return
         
@@ -93,7 +92,7 @@ class SLABot:
             employee_tasks = []
             for task in tasks:
                 employee = find_employee_by_name(task['assignee'])
-                if employee:  # Если сотрудник найден в базе
+                if employee:
                     employee_tasks.append(task)
             
             logger.info(f"📊 Задач от сотрудников отдела: {len(employee_tasks)}")
@@ -117,15 +116,82 @@ class SLABot:
             # Сортируем по времени до дедлайна
             new_tasks.sort(key=lambda x: x['hours_until_due'])
             
-            # Формируем ОДНО общее сообщение
-            await self._send_bulk_notification(new_tasks, is_manual=False)
+            # ГИБКАЯ ДОСТАВКА: если задач много — отправляем Excel, если мало — текстом
+            if len(new_tasks) >= 5:
+                logger.info(f"📊 Отправляем Excel отчёт ({len(new_tasks)} задач)")
+                await self._send_excel_notification(new_tasks)
+            else:
+                logger.info(f"📊 Отправляем текстовое уведомление ({len(new_tasks)} задач)")
+                await self._send_bulk_notification(new_tasks, is_manual=False)
             
         except Exception as e:
             logger.error(f"❌ Ошибка при проверке задач: {e}", exc_info=True)
     
+    async def _send_excel_notification(self, tasks: list):
+        """
+        Отправляет Excel файл с тегами исполнителей
+        """
+        if not tasks:
+            return
+        
+        # Проверяем текущее время (МСК)
+        now = datetime.now()
+        current_hour = now.hour
+        current_weekday = now.weekday()
+        
+        # Проверяем, можно ли тегать
+        should_mention = config.TAG_ENABLED
+        if should_mention:
+            time_ok = current_hour >= config.TAG_START_HOUR and current_hour < config.TAG_END_HOUR
+            day_ok = True
+            if config.TAG_WORKDAYS_ONLY:
+                day_ok = current_weekday < 5
+            should_mention = time_ok and day_ok
+        
+        # Собираем теги исполнителей
+        mentions = []
+        for task in tasks:
+            employee = find_employee_by_name(task['assignee'])
+            if employee and should_mention:
+                mentions.append(employee['telegram_username'])
+        
+        mentions_str = " ".join(set(mentions)) if mentions else ""
+        
+        # Генерируем Excel файл
+        excel_file = await self._generate_excel_report(tasks)
+        
+        # Формируем сообщение
+        if mentions_str:
+            caption = (
+                f"📊 Коллеги, в файле собраны задачи с истекающим SLA ({len(tasks)} шт.).\n"
+                f"Просьба обратить внимание на свои задачи: {mentions_str}"
+            )
+        else:
+            caption = (
+                f"📊 Коллеги, в файле собраны задачи с истекающим SLA ({len(tasks)} шт.).\n"
+                f"Просьба обратить внимание на свои задачи."
+            )
+        
+        # Отправляем файл
+        try:
+            await self.bot.send_document(
+                chat_id=self.chat_id,
+                document=InputFile(excel_file, filename=excel_file.name),
+                caption=caption,
+                disable_web_page_preview=True
+            )
+            logger.info(f"✅ Отправлен Excel отчёт с {len(tasks)} задачами")
+            
+            # Добавляем задачи в список уведомлённых
+            for task in tasks:
+                self.notified_tasks.add(task['id'])
+                
+        except TelegramError as e:
+            logger.error(f"❌ Ошибка отправки Excel отчёта: {e}")
+    
     async def _send_bulk_notification(self, tasks: list, is_manual: bool = False):
         """
-        Отправляет одно общее уведомление со всеми задачами
+        Отправляет одно общее уведомление со всеми задачами (текстом)
         """
         if not tasks:
             return
@@ -249,11 +315,9 @@ class SLABot:
     
     async def _generate_excel_report(self, tasks: list) -> io.BytesIO:
         """Генерирует Excel файл с отчётом по задачам"""
-        logger.info(f"📊 _generate_excel_report начал работу с {len(tasks)} задачами")
+        logger.info(f"📊 Генерация Excel для {len(tasks)} задач")
         
         if not tasks:
-            logger.info("📊 Нет задач, возвращаем пустой отчёт")
-            # Создаём пустой отчёт, если нет задач
             wb = Workbook()
             ws = wb.active
             ws.title = "SLA Отчёт"
@@ -265,22 +329,20 @@ class SLABot:
             return excel_bytes
         
         try:
-            # Создаём книгу и активный лист
             wb = Workbook()
             ws = wb.active
             ws.title = "SLA Отчёт"
             
-            # Заголовки (сократил для экономии места)
+            # Заголовки
             headers = [
                 'ID', 'Название', 'Исполнитель', 'Telegram', 'Создана',
                 'Дедлайн', 'Ост.(ч)', 'Статус SLA', 'Статус', 'Приоритет', 'Ссылка'
             ]
             
-            # Простые заголовки без сложного форматирования (для скорости)
             for col, header in enumerate(headers, 1):
                 ws.cell(row=1, column=col, value=header)
             
-            # Данные (без лишних проверок)
+            # Данные
             for row, task in enumerate(tasks, 2):
                 employee = find_employee_by_name(task['assignee'])
                 telegram = employee['telegram_username'] if employee else '—'
@@ -310,34 +372,32 @@ class SLABot:
                 
                 # Записываем данные
                 ws.cell(row=row, column=1, value=task['id'])
-                ws.cell(row=row, column=2, value=task['title'][:50])  # Обрезаем длинные названия
+                ws.cell(row=row, column=2, value=task['title'][:50])
                 ws.cell(row=row, column=3, value=task['assignee'])
                 ws.cell(row=row, column=4, value=telegram)
                 ws.cell(row=row, column=5, value=created_date)
                 ws.cell(row=row, column=6, value=task['due_date'].strftime('%d.%m.%Y'))
                 ws.cell(row=row, column=7, value=round(hours, 1))
                 ws.cell(row=row, column=8, value=sla_status)
-                ws.cell(row=row, column=9, value=task['status'][:15])  # Обрезаем длинные статусы
+                ws.cell(row=row, column=9, value=task['status'][:15])
                 ws.cell(row=row, column=10, value=task['priority'] or '—')
                 ws.cell(row=row, column=11, value=task['url'])
             
-            # Автоширина только для нескольких первых колонок
+            # Автоширина
             for col in range(1, 6):
                 ws.column_dimensions[chr(64 + col)].width = 15
-            ws.column_dimensions[chr(64 + 11)].width = 30  # Ссылка
+            ws.column_dimensions[chr(64 + 11)].width = 30
             
-            # Сохраняем
             excel_bytes = io.BytesIO()
             wb.save(excel_bytes)
             excel_bytes.seek(0)
             excel_bytes.name = f"sla_report_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
             
-            logger.info(f"✅ Excel отчёт сгенерирован за {len(tasks)} задач")
+            logger.info(f"✅ Excel отчёт сгенерирован")
             return excel_bytes
             
         except Exception as e:
             logger.error(f"❌ Ошибка при генерации Excel: {e}")
-            # Возвращаем простой отчёт с ошибкой
             wb = Workbook()
             ws = wb.active
             ws.cell(row=1, column=1, value=f"Ошибка генерации отчёта: {str(e)}")
@@ -383,20 +443,13 @@ class SLABot:
     async def get_task_by_key(self, task_key: str) -> Optional[Dict]:
         """Получает конкретную задачу по ключу через прямой запрос"""
         try:
-            # Прямой запрос к API
             task_data = await self.api_client.get_task_by_key(task_key)
-            
             if not task_data:
                 return None
             
-            # Преобразуем в нужный формат
             fields = task_data.get('fields', {})
             assignee_data = fields.get('assignee')
-            
-            # Получаем имя исполнителя из API
             assignee_name = self.api_client._extract_assignee(assignee_data)
-            
-            # Получаем дату SLA
             due_date, sla_source = self.api_client._extract_sla_date(fields)
             
             if due_date:
@@ -409,8 +462,8 @@ class SLABot:
                     "id": task_data.get('key'),
                     "key": task_data.get('key'),
                     "title": fields.get('summary', 'Без названия'),
-                    "assignee": assignee_name,  # Имя из API
-                    "assignee_raw": assignee_data,  # Оригинальные данные
+                    "assignee": assignee_name,
+                    "assignee_raw": assignee_data,
                     "due_date": due_date,
                     "hours_until_due": hours_until_due,
                     "should_notify": hours_until_due <= config.SLA_HOURS,
@@ -419,12 +472,10 @@ class SLABot:
                     "priority": fields.get('priority', {}).get('name') if fields.get('priority') else None,
                     "url": f"{self.api_client.base_url}/browse/{task_data.get('key')}",
                     "due_date_source": sla_source,
-                    "created": fields.get('created')  # Добавляем дату создания
+                    "created": fields.get('created')
                 }
                 return task
-            
             return None
-            
         except Exception as e:
             logger.error(f"Ошибка при получении задачи {task_key}: {e}")
             return None
@@ -432,7 +483,6 @@ class SLABot:
     async def handle_updates(self):
         """Обрабатывает входящие команды"""
         try:
-            # Уменьшаем таймаут и обрабатываем ошибки
             try:
                 updates = await self.bot.get_updates(offset=self.last_update_id + 1, timeout=10)
             except Exception as e:
@@ -448,9 +498,7 @@ class SLABot:
                     chat_id = update.message.chat_id
                     user_id = update.message.from_user.id
                     
-                    # ДОБАВЬ ЭТУ СТРОКУ ДЛЯ ОТЛАДКИ
                     logger.info(f"📨 Получено сообщение: '{text}' от {user_id}")
-                    
                     
                     # ПРОВЕРКА: запрещаем личные сообщения
                     try:
@@ -473,10 +521,8 @@ class SLABot:
                     # ИЗВЛЕКАЕМ БАЗОВУЮ КОМАНДУ (отрезаем @username если есть)
                     if '@' in full_command:
                         base_command = full_command.split('@')[0]
-                        logger.debug(f"Команда с @username: {full_command} -> базовая: {base_command}")
                     else:
                         base_command = full_command
-                        logger.debug(f"Команда без @username: {base_command}")
                     
                     # Обрабатываем команды по base_command
                     if base_command == '/start':
@@ -509,17 +555,14 @@ class SLABot:
                             text="🔍 Формирую отчёт по новым задачам с истекающим SLA..."
                         )
                         
-                        # Получаем задачи
                         tasks = await self.api_client.get_tasks()
                         
-                        # Фильтруем задачи: только те, где исполнитель есть в базе
                         employee_tasks = []
                         for task in tasks:
                             employee = find_employee_by_name(task['assignee'])
-                            if employee:  # Если сотрудник найден в базе
+                            if employee:
                                 employee_tasks.append(task)
                         
-                        # Из них отбираем те, что требуют уведомления
                         tasks_to_notify = [t for t in employee_tasks if t.get('should_notify', False)]
                         
                         if not tasks_to_notify:
@@ -529,7 +572,6 @@ class SLABot:
                             )
                             continue
                         
-                        # Фильтруем задачи, которые ещё не уведомляли (КАК В АВТОПРОВЕРКЕ)
                         new_tasks = [t for t in tasks_to_notify if t['id'] not in self.notified_tasks]
                         
                         if not new_tasks:
@@ -539,69 +581,48 @@ class SLABot:
                             )
                             continue
                         
-                        # Сортируем по времени до дедлайна
                         new_tasks.sort(key=lambda x: x['hours_until_due'])
                         
-                        # Отправляем общее сообщение с новыми задачами
-                        await self._send_bulk_notification(new_tasks, is_manual=False)
+                        # ГИБКАЯ ДОСТАВКА
+                        if len(new_tasks) >= 5:
+                            await self._send_excel_notification(new_tasks)
+                        else:
+                            await self._send_bulk_notification(new_tasks, is_manual=False)
                     
                     elif base_command == '/checking_dep':
-                        try:
-                            logger.info("🔴 /checking_dep: НАЧАЛО ОБРАБОТКИ")
-                            print("🔴 /checking_dep: НАЧАЛО ОБРАБОТКИ", flush=True)
-                            
+                        await self.bot.send_message(
+                            chat_id=chat_id,
+                            text="📊 Формирую Excel отчёт по задачам отдела..."
+                        )
+                        
+                        tasks = await self.api_client.get_tasks()
+                        
+                        dep_tasks = []
+                        for task in tasks:
+                            employee = find_employee_by_name(task['assignee'])
+                            if employee:
+                                dep_tasks.append(task)
+                        
+                        if not dep_tasks:
                             await self.bot.send_message(
                                 chat_id=chat_id,
-                                text="📊 Формирую Excel отчёт по задачам..."
+                                text="✅ Нет задач у сотрудников отдела"
                             )
-                            logger.info("🔴 /checking_dep: сообщение отправлено")
-                            
-                            # Получаем задачи
-                            logger.info("🔴 /checking_dep: запрос задач из Jira")
-                            tasks = await self.api_client.get_tasks()
-                            logger.info(f"🔴 /checking_dep: получено задач {len(tasks)}")
-                            
-                            # Фильтруем задачи
-                            dep_tasks = []
-                            for task in tasks:
-                                employee = find_employee_by_name(task['assignee'])
-                                if employee:
-                                    dep_tasks.append(task)
-                            logger.info(f"🔴 /checking_dep: отфильтровано {len(dep_tasks)} задач отдела")
-                            
-                            if not dep_tasks:
-                                await self.bot.send_message(
-                                    chat_id=chat_id,
-                                    text="✅ Нет задач у сотрудников отдела"
-                                )
-                                continue
-                            
-                            # Сортируем
-                            dep_tasks.sort(key=lambda x: x['hours_until_due'])
-                            logger.info("🔴 /checking_dep: задачи отсортированы")
-                            
-                            # Генерируем Excel
-                            logger.info("🔴 /checking_dep: начинаем генерацию Excel")
-                            excel_file = await self._generate_excel_report(dep_tasks)
-                            logger.info("🔴 /checking_dep: Excel сгенерирован")
-                            
-                            # Отправляем файл
-                            await self.bot.send_document(
-                                chat_id=chat_id,
-                                document=InputFile(excel_file, filename=excel_file.name),
-                                caption=f"📊 Отчёт по задачам (всего: {len(dep_tasks)})"
-                            )
-                            logger.info(f"✅ Отправлен Excel отчёт с {len(dep_tasks)} задачами")
-                            
-                        except Exception as e:
-                            logger.error(f"❌ Ошибка в /checking_dep: {e}", exc_info=True)
-                            await self.bot.send_message(
-                                chat_id=chat_id,
-                                text=f"❌ Ошибка при формировании отчёта: {str(e)[:200]}"
-                            )
+                            continue
+                        
+                        dep_tasks.sort(key=lambda x: x['hours_until_due'])
+                        
+                        excel_file = await self._generate_excel_report(dep_tasks)
+                        
+                        await self.bot.send_document(
+                            chat_id=chat_id,
+                            document=InputFile(excel_file, filename=excel_file.name),
+                            caption=f"📊 Отчёт по задачам отдела (всего: {len(dep_tasks)})"
+                        )
+                        
+                        logger.info(f"✅ Отправлен Excel отчёт с {len(dep_tasks)} задачами")
                     
                     elif base_command == '/check':
-                        # Проверяем, есть ли аргумент (номер задачи)
                         if len(parts) < 2:
                             await self.bot.send_message(
                                 chat_id=chat_id,
@@ -611,7 +632,6 @@ class SLABot:
                         
                         task_key = parts[1].upper()
                         
-                        # Проверяем формат задачи
                         if not re.match(r'^ZZ-\d+$', task_key, re.IGNORECASE):
                             await self.bot.send_message(
                                 chat_id=chat_id,
@@ -624,7 +644,6 @@ class SLABot:
                             text=f"🔍 Ищу задачу {task_key}..."
                         )
                         
-                        # Получаем задачу через прямой запрос
                         task = await self.get_task_by_key(task_key)
                         
                         if not task:
@@ -634,10 +653,8 @@ class SLABot:
                             )
                             continue
                         
-                        # Форматируем исполнителя: имя из API + (тег) если есть
                         assignee_formatted = self._format_assignee(task['assignee'])
                         
-                        # Форматируем дату создания
                         created_date = "неизвестно"
                         if 'created' in task and task['created']:
                             try:
@@ -649,11 +666,9 @@ class SLABot:
                             except:
                                 created_date = str(task['created'])[:16]
                         
-                        # Получаем статус SLA
                         hours = task['hours_until_due']
                         sla_status = self._get_sla_status(hours)
                         
-                        # Формируем сообщение
                         task_info = (
                             f"📌 Задача: {task['id']}\n"
                             f"📋 Название: {task['title']}\n"
@@ -674,7 +689,6 @@ class SLABot:
                         )
                     
                     elif base_command == '/update':
-                        # Проверяем права администратора
                         is_admin = await self.is_user_admin(chat_id, user_id)
                         
                         if not is_admin:
@@ -695,7 +709,6 @@ class SLABot:
                         sys.exit(0)
                     
                     elif base_command == '/restart':
-                        # Проверяем права администратора
                         is_admin = await self.is_user_admin(chat_id, user_id)
                         
                         if not is_admin:
@@ -717,7 +730,6 @@ class SLABot:
                         os.execl(python, python, *sys.argv)
                     
                     else:
-                        # Неизвестная команда
                         await self.bot.send_message(
                             chat_id=chat_id,
                             text="❌ Неизвестная команда\n\nНапишите /help для списка команд"
@@ -736,21 +748,16 @@ class SLABot:
     async def run_forever(self):
         """Запускает бесконечный цикл"""
         logger.info(f"🚀 Бот запущен. Интервал проверки: {config.CHECK_INTERVAL_MINUTES} минут")
-        
-        # Пропускаем получение update_id при старте (оно будет в handle_updates)
         self.last_update_id = 0
         
         while self.is_running:
             try:
-                # Проверяем задачи с интервалом из config.py
                 current_minute = datetime.now().minute
                 if current_minute % config.CHECK_INTERVAL_MINUTES == 0:
                     await self.check_tasks()
-                    await asyncio.sleep(60)  # Ждем минуту, чтобы не проверять несколько раз
+                    await asyncio.sleep(60)
                 
-                # Обрабатываем команды (каждую секунду)
                 await self.handle_updates()
-                
                 await asyncio.sleep(1)
                 
             except KeyboardInterrupt:
@@ -759,7 +766,7 @@ class SLABot:
             except Exception as e:
                 logger.error(f"❌ Ошибка в основном цикле: {e}", exc_info=True)
                 await asyncio.sleep(5)
-    
+
 
 async def test_bot():
     """Тестовая функция"""
@@ -829,7 +836,6 @@ if __name__ == "__main__":
         elif sys.argv[1] == "--send-test":
             asyncio.run(send_test_notification())
     else:
-        # Постоянная работа
         bot = SLABot()
         try:
             asyncio.run(bot.run_forever())
