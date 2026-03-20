@@ -14,6 +14,9 @@ API_URL = os.getenv("API_URL", "https://support.sbertroika.ru")
 API_TOKEN = os.getenv("API_TOKEN", "ODUxMTgzODUyODkyOm5XL0uISXn8vaT1VLN/FnQYss1K")
 API_TIMEOUT = 30
 
+# Принудительное использование IPv6
+FORCE_IPV6 = True
+
 # Настройки SLA
 SLA_HOURS = 24
 CHECK_INTERVAL_MINUTES = 180
