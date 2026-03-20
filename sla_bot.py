@@ -63,15 +63,15 @@ class SLABot:
         Запрещает личные сообщения, разрешает только групповой чат
         """
         try:
-            chat = await self.bot.get_chat(chat_id)
-            # Разрешаем только групповые чаты (type = 'group' или 'supergroup')
+            # Используем кэш для ускорения
+            chat = await self.bot.get_chat(chat_id, read_timeout=5)
             if chat.type in ['group', 'supergroup']:
                 return True
             else:
                 logger.warning(f"Запрещённый чат: {chat_id} (тип: {chat.type})")
                 return False
         except Exception as e:
-            logger.error(f"Ошибка при проверке типа чата: {e}")
+            logger.debug(f"Ошибка при проверке типа чата: {e}")
             return False
     
     async def check_tasks(self):
@@ -431,7 +431,13 @@ class SLABot:
     async def handle_updates(self):
         """Обрабатывает входящие команды"""
         try:
-            updates = await self.bot.get_updates(offset=self.last_update_id + 1, timeout=30)
+            # Уменьшаем таймаут и обрабатываем ошибки
+            try:
+                updates = await self.bot.get_updates(offset=self.last_update_id + 1, timeout=10)
+            except Exception as e:
+                logger.debug(f"Ошибка получения обновлений: {e}")
+                await asyncio.sleep(1)
+                return
             
             for update in updates:
                 self.last_update_id = update.update_id
@@ -442,7 +448,13 @@ class SLABot:
                     user_id = update.message.from_user.id
                     
                     # ПРОВЕРКА: запрещаем личные сообщения
-                    if not await self.is_allowed_chat(chat_id):
+                    try:
+                        is_allowed = await self.is_allowed_chat(chat_id)
+                    except Exception as e:
+                        logger.debug(f"Ошибка проверки чата: {e}")
+                        continue
+                    
+                    if not is_allowed:
                         await self.bot.send_message(
                             chat_id=chat_id,
                             text="❌ Бот работает только в групповых чатах. Личные сообщения запрещены."
