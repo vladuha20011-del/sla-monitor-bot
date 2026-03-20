@@ -60,16 +60,18 @@ class TaskAPIClient:
                 ]
             }
             
+            # Добавляем Host в заголовки для обхода SSL-проблем при использовании IP
             headers = {
                 "Authorization": f"Bearer {self.api_token}",
-                "Accept": "application/json"
+                "Accept": "application/json",
+                "Host": "support.sbertroika.ru"
             }
             
             logger.info(f"📡 Запрос к Jira API: {api_endpoint}")
             logger.info(f"📋 JQL: {jql_query.strip()}")
             
-            # Принудительное использование IPv6
-            connector = aiohttp.TCPConnector(family=socket.AF_INET6)
+            # Используем IPv4 для Jira (AF_INET вместо AF_INET6)
+            connector = aiohttp.TCPConnector(family=socket.AF_INET)
             
             async with aiohttp.ClientSession(connector=connector, timeout=self.timeout) as session:
                 async with session.get(
@@ -316,13 +318,14 @@ class TaskAPIClient:
             url = f"{self.base_url}/rest/api/2/issue/{task_key}"
             headers = {
                 "Authorization": f"Bearer {self.api_token}",
-                "Accept": "application/json"
+                "Accept": "application/json",
+                "Host": "support.sbertroika.ru"
             }
             
             logger.info(f"🔍 Прямой запрос задачи {task_key}")
             
-            # Принудительное использование IPv6 и для прямых запросов
-            connector = aiohttp.TCPConnector(family=socket.AF_INET6)
+            # Используем IPv4 для Jira
+            connector = aiohttp.TCPConnector(family=socket.AF_INET)
             
             async with aiohttp.ClientSession(connector=connector) as session:
                 async with session.get(url, headers=headers) as response:
