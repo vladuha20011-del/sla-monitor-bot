@@ -546,49 +546,59 @@ class SLABot:
                         await self._send_bulk_notification(new_tasks, is_manual=False)
                     
                     elif base_command == '/checking_dep':
-                        await self.bot.send_message(
-                            chat_id=chat_id,
-                            text="📊 Формирую Excel отчёт по задачам..."
-                        )
-                        
-                        # Получаем задачи
-                        tasks = await self.api_client.get_tasks()
-                        logger.info(f"📊 Получено задач из Jira: {len(tasks)}")
-                        
-                        # Фильтруем задачи только тех, чьи исполнители есть в EMPLOYEES
-                        dep_tasks = []
-                        for task in tasks:
-                            employee = find_employee_by_name(task['assignee'])
-                            if employee:
-                                dep_tasks.append(task)
-                        
-                        logger.info(f"📊 Задач от сотрудников отдела: {len(dep_tasks)}")
-                        
-                        if not dep_tasks:
+                        try:
+                            logger.info("🔴 /checking_dep: НАЧАЛО ОБРАБОТКИ")
+                            print("🔴 /checking_dep: НАЧАЛО ОБРАБОТКИ", flush=True)
+                            
                             await self.bot.send_message(
                                 chat_id=chat_id,
-                                text="✅ Нет задач у сотрудников отдела"
+                                text="📊 Формирую Excel отчёт по задачам..."
                             )
-                            continue
-                        
-                        # Сортируем по времени до дедлайна
-                        dep_tasks.sort(key=lambda x: x['hours_until_due'])
-                        
-                        logger.info(f"📊 Начинаем генерацию Excel для {len(dep_tasks)} задач")
-                        
-                        # Генерируем Excel файл
-                        excel_file = await self._generate_excel_report(dep_tasks)
-                        
-                        logger.info(f"📊 Excel сгенерирован, отправляем...")
-                        
-                        # Отправляем файл
-                        await self.bot.send_document(
-                            chat_id=chat_id,
-                            document=InputFile(excel_file, filename=excel_file.name),
-                            caption=f"📊 Отчёт по задачам (всего: {len(dep_tasks)})"
-                        )
-                        
-                        logger.info(f"✅ Отправлен Excel отчёт с {len(dep_tasks)} задачами")
+                            logger.info("🔴 /checking_dep: сообщение отправлено")
+                            
+                            # Получаем задачи
+                            logger.info("🔴 /checking_dep: запрос задач из Jira")
+                            tasks = await self.api_client.get_tasks()
+                            logger.info(f"🔴 /checking_dep: получено задач {len(tasks)}")
+                            
+                            # Фильтруем задачи
+                            dep_tasks = []
+                            for task in tasks:
+                                employee = find_employee_by_name(task['assignee'])
+                                if employee:
+                                    dep_tasks.append(task)
+                            logger.info(f"🔴 /checking_dep: отфильтровано {len(dep_tasks)} задач отдела")
+                            
+                            if not dep_tasks:
+                                await self.bot.send_message(
+                                    chat_id=chat_id,
+                                    text="✅ Нет задач у сотрудников отдела"
+                                )
+                                continue
+                            
+                            # Сортируем
+                            dep_tasks.sort(key=lambda x: x['hours_until_due'])
+                            logger.info("🔴 /checking_dep: задачи отсортированы")
+                            
+                            # Генерируем Excel
+                            logger.info("🔴 /checking_dep: начинаем генерацию Excel")
+                            excel_file = await self._generate_excel_report(dep_tasks)
+                            logger.info("🔴 /checking_dep: Excel сгенерирован")
+                            
+                            # Отправляем файл
+                            await self.bot.send_document(
+                                chat_id=chat_id,
+                                document=InputFile(excel_file, filename=excel_file.name),
+                                caption=f"📊 Отчёт по задачам (всего: {len(dep_tasks)})"
+                            )
+                            logger.info(f"✅ Отправлен Excel отчёт с {len(dep_tasks)} задачами")
+                            
+                        except Exception as e:
+                            logger.error(f"❌ Ошибка в /checking_dep: {e}", exc_info=True)
+                            await self.bot.send_message(
+                                chat_id=chat_id,
+                                text=f"❌ Ошибка при формировании отчёта: {str(e)[:200]}"
+                            )
                     
                     elif base_command == '/check':
                         # Проверяем, есть ли аргумент (номер задачи)
