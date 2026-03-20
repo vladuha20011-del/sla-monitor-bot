@@ -248,10 +248,11 @@ class SLABot:
                 logger.error(f"❌ Ошибка отправки общего уведомления: {e}")
     
     async def _generate_excel_report(self, tasks: list) -> io.BytesIO:
-        """
-        Генерирует Excel файл с отчётом по задачам (оптимизированная версия)
-        """
+        """Генерирует Excel файл с отчётом по задачам"""
+        logger.info(f"📊 _generate_excel_report начал работу с {len(tasks)} задачами")
+        
         if not tasks:
+            logger.info("📊 Нет задач, возвращаем пустой отчёт")
             # Создаём пустой отчёт, если нет задач
             wb = Workbook()
             ws = wb.active
