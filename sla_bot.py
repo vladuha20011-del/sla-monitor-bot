@@ -715,21 +715,8 @@ class SLABot:
         """Запускает бесконечный цикл"""
         logger.info(f"🚀 Бот запущен. Интервал проверки: {config.CHECK_INTERVAL_MINUTES} минут")
         
-        # Сначала получаем последний update_id с увеличенным таймаутом
-        try:
-            # Используем короткий таймаут для первого запроса
-            updates = await self.bot.get_updates(timeout=5)
-            if updates:
-                self.last_update_id = updates[-1].update_id
-                logger.info(f"📝 Последний update_id: {self.last_update_id}")
-            else:
-                logger.info("📝 Нет старых обновлений")
-        except Exception as e:
-            logger.warning(f"Не удалось получить последний update_id: {e}")
-            # Продолжаем работу, начнём с 0
-            self.last_update_id = 0
-        
-        # Убрали отправку сообщения о запуске в чат
+        # Пропускаем получение update_id при старте (оно будет в handle_updates)
+        self.last_update_id = 0
         
         while self.is_running:
             try:
