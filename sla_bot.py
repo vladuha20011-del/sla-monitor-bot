@@ -156,6 +156,7 @@ class SLABot:
         
         # Формируем заголовок (всегда одинаковый)
         message = "⚠️ Внимание! Приближается SLA!\n\n"
+        messages_sent = 0
         
         for i, task in enumerate(tasks):
             # Находим сотрудника по имени
@@ -209,7 +210,7 @@ class SLABot:
             if not is_manual:
                 self.notified_tasks.add(task['id'])
             
-            # Telegram имеет лимит на длину сообщения (4096 символов)
+            # Telegram имеет лимит на длину сообщения (3500 символов)
             if len(message) > 3500:
                 # Добавляем финальное обращение перед отправкой
                 if not message.endswith("Коллеги, обратите внимание на задачи!"):
@@ -220,6 +221,12 @@ class SLABot:
                     text=message,
                     disable_web_page_preview=True
                 )
+                messages_sent += 1
+                logger.info(f"📨 Отправлена часть {messages_sent} (примерно {i+1}/{len(tasks)} задач)")
+                
+                # ВАЖНО: задержка между отправками
+                await asyncio.sleep(2)
+                
                 # Начинаем новое сообщение
                 message = "⚠️ Внимание! Приближается SLA! (продолжение)\n\n"
         
@@ -235,7 +242,8 @@ class SLABot:
                     text=message,
                     disable_web_page_preview=True
                 )
-                logger.info(f"✅ Отправлено общее уведомление с {len(tasks)} задачами")
+                messages_sent += 1
+                logger.info(f"✅ Отправлено общее уведомление с {len(tasks)} задачами (всего {messages_sent} частей)")
             except TelegramError as e:
                 logger.error(f"❌ Ошибка отправки общего уведомления: {e}")
     
