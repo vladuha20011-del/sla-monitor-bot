@@ -447,6 +447,10 @@ class SLABot:
                     chat_id = update.message.chat_id
                     user_id = update.message.from_user.id
                     
+                    # ДОБАВЬ ЭТУ СТРОКУ ДЛЯ ОТЛАДКИ
+                    logger.info(f"📨 Получено сообщение: '{text}' от {user_id}")
+                    
+                    
                     # ПРОВЕРКА: запрещаем личные сообщения
                     try:
                         is_allowed = await self.is_allowed_chat(chat_id)
