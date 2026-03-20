@@ -177,8 +177,7 @@ class SLABot:
             await self.bot.send_document(
                 chat_id=self.chat_id,
                 document=InputFile(excel_file, filename=excel_file.name),
-                caption=caption,
-                disable_web_page_preview=True
+                caption=caption
             )
             logger.info(f"✅ Отправлен Excel отчёт с {len(tasks)} задачами")
             
