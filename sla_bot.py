@@ -552,13 +552,16 @@ class SLABot:
                         
                         # Получаем задачи
                         tasks = await self.api_client.get_tasks()
+                        logger.info(f"📊 Получено задач из Jira: {len(tasks)}")
                         
                         # Фильтруем задачи только тех, чьи исполнители есть в EMPLOYEES
                         dep_tasks = []
                         for task in tasks:
                             employee = find_employee_by_name(task['assignee'])
-                            if employee:  # Если сотрудник найден в базе
+                            if employee:
                                 dep_tasks.append(task)
+                        
+                        logger.info(f"📊 Задач от сотрудников отдела: {len(dep_tasks)}")
                         
                         if not dep_tasks:
                             await self.bot.send_message(
@@ -570,8 +573,12 @@ class SLABot:
                         # Сортируем по времени до дедлайна
                         dep_tasks.sort(key=lambda x: x['hours_until_due'])
                         
+                        logger.info(f"📊 Начинаем генерацию Excel для {len(dep_tasks)} задач")
+                        
                         # Генерируем Excel файл
                         excel_file = await self._generate_excel_report(dep_tasks)
+                        
+                        logger.info(f"📊 Excel сгенерирован, отправляем...")
                         
                         # Отправляем файл
                         await self.bot.send_document(
