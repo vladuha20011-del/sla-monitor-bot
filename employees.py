@@ -123,6 +123,15 @@ EMPLOYEES = [
         "search_names": ["папов", "ильяс"],
         "telegram_username": "@roiILyasik",
         "email": "papov-ib@sbertroika.ru"
+    },
+    
+    # Сотрудник 14
+    {
+        "id": 14,
+        "full_name": "Корженков Александр Дмитриевич",
+        "search_names": ["корженков", "александр"],
+        "telegram_username": "@korzhenkovad",
+        "email": "korzhenkov-ad@sbertroika.ru"
     }
 ]
 
@@ -209,6 +218,7 @@ if __name__ == "__main__":
         "Веселков Даниил",
         "Мифтахутдинов Даниил",
         "Папов Ильяс",
+        "Корженков Александр",
         "Неизвестный Автор"
     ]
     
