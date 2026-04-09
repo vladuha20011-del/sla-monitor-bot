@@ -242,9 +242,16 @@ class SLABot:
             # Добавляем оставшееся время
             if task.get('remaining_text'):
                 message += f"⏰ Осталось на решение: {task['remaining_text']}\n"
+            elif task.get('due_date'):
+                # Проверяем, переоткрыта ли задача без активного SLA
+                if was_reopened and not task.get('remaining_text'):
+                    message += f"⏰ Дедлайн: {task['due_date'].strftime('%d.%m.%Y %H:%M')}\n"
+                    message += f"⌛ Осталось: 0ч (SLA не перезапущен)\n"
+                else:
+                    message += f"⏰ Дедлайн: {task['due_date'].strftime('%d.%m.%Y %H:%M')}\n"
+                    message += f"⌛ Осталось: {time_str}\n"
             else:
-                message += f"⏰ Дедлайн: {task['due_date'].strftime('%d.%m.%Y %H:%M')}\n"
-                message += f"⌛ Осталось: {time_str}\n"
+                message += f"⏰ Дедлайн: не указан\n"
             
             message += (
                 f"📊 {sla_status}\n"
@@ -844,8 +851,12 @@ class SLABot:
                         if task.get('remaining_text'):
                             task_info += f"⏰ Осталось на решение: {task['remaining_text']}\n"
                         elif task.get('due_date'):
-                            task_info += f"⏰ Дедлайн: {task['due_date'].strftime('%d.%m.%Y %H:%M')}\n"
-                            task_info += f"⌛ Осталось: {self._format_time(hours)}\n"
+                            if task.get('was_reopened') and not task.get('remaining_text'):
+                                task_info += f"⏰ Дедлайн: {task['due_date'].strftime('%d.%m.%Y %H:%M')}\n"
+                                task_info += f"⌛ Осталось: 0ч (SLA не перезапущен)\n"
+                            else:
+                                task_info += f"⏰ Дедлайн: {task['due_date'].strftime('%d.%m.%Y %H:%M')}\n"
+                                task_info += f"⌛ Осталось: {self._format_time(hours)}\n"
                         else:
                             task_info += f"⏰ Дедлайн: не указан\n"
                         
