@@ -386,23 +386,32 @@ class TaskAPIClient:
     
     async def get_reopen_info(self, issue_key: str) -> tuple:
         """
-        Проверяет, была ли задача переоткрыта после статуса "Решен"
+        Проверяет, была ли задача переоткрыта
         Возвращает (was_reopened, reopen_date)
+        Определяет по количеству SLA циклов в customfield_10611
         """
-        url = f"{self.base_url}/rest/api/2/issue/{issue_key}/changelog"
-        headers = {"Authorization": f"Bearer {self.api_token}"}
-        
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    for change in data.get('values', []):
-                        for item in change.get('items', []):
-                            if item.get('field') == 'status':
-                                if item.get('fromString') == 'Решен' and item.get('toString') != 'Решен':
-                                    reopen_date = change.get('created')
-                                    return True, reopen_date
-        return False, None
+        try:
+            task_data = await self.get_task_by_key(issue_key)
+            if not task_data:
+                return False, None
+            
+            fields = task_data.get('fields', {})
+            sla_data = fields.get('customfield_10611', {})
+            completed_cycles = sla_data.get('completedCycles', [])
+            
+            # Если есть завершённые циклы, значит задача переоткрывалась
+            if completed_cycles and len(completed_cycles) > 0:
+                # Берём дату начала последнего цикла
+                last_cycle = completed_cycles[-1]
+                reopen_date = last_cycle.get('startTime', {}).get('iso8601')
+                if reopen_date:
+                    return True, reopen_date
+            
+            return False, None
+            
+        except Exception as e:
+            logger.error(f"Ошибка получения истории для {issue_key}: {e}")
+            return False, None
     
     async def get_task_by_key(self, task_key: str) -> Optional[Dict]:
         """Получить задачу по ключу напрямую из API"""
