@@ -857,30 +857,21 @@ class SLABot:
                             if task.get('was_reopened') and not task.get('remaining_text'):
                                 task_info += f"⏰ Дедлайн: {task['due_date'].strftime('%d.%m.%Y %H:%M')}\n"
                                 task_info += f"⌛ Осталось: 0ч (SLA не перезапущен)\n"
+                                # ДОБАВЛЯЕМ СТРОКУ ТОЛЬКО ЗДЕСЬ, ОДИН РАЗ
+                                task_info += f"ℹ️ Задача была переоткрыта! SLA не был перезапущен\n"
                             else:
                                 task_info += f"⏰ Дедлайн: {task['due_date'].strftime('%d.%m.%Y %H:%M')}\n"
                                 task_info += f"⌛ Осталось: {self._format_time(hours)}\n"
                         else:
                             task_info += f"⏰ Дедлайн: не указан\n"
                         
-                        # Добавляем примечание о переоткрытии (ДО статуса задачи)
-                        if task.get('was_reopened'):
-                            if not task.get('remaining_text') and task.get('due_date'):
-                                task_info += f"ℹ️ Задача была переоткрыта! SLA не был перезапущен\n"
-                            else:
-                                task_info += f"ℹ️ Задача была переоткрыта!\n"
+                        # НЕ ДОБАВЛЯЕМ НИЧЕГО ДОПОЛНИТЕЛЬНО!
                         
                         task_info += (
                             f"📈 Статус задачи: {task['status']}\n"
                             f"🎯 Приоритет: {task['priority'] or 'Не указан'}"
                         )
                         
-                        # Добавляем примечание о переоткрытии (только одна строка!)
-                        if task.get('was_reopened'):
-                            if not task.get('remaining_text') and task.get('due_date'):
-                                task_info += f"\nℹ️ Задача была переоткрыта! SLA не был перезапущен"
-                            else:
-                                task_info += f"\nℹ️ Задача была переоткрыта!"
                         
                         await self.bot.send_message(
                             chat_id=chat_id,
