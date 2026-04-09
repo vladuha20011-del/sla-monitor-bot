@@ -97,17 +97,41 @@ class TaskAPIClient:
             logger.error(f"❌ Ошибка при запросе к Jira API: {e}", exc_info=True)
             return []
     
-    async def get_all_tasks_by_user(self, assignee_name: str, max_results: int = 500) -> List[Dict[str, Any]]:
+    async def get_all_tasks_by_user(self, username: str, max_results: int = 500) -> List[Dict[str, Any]]:
         """
-        Получает ВСЕ задачи (любые статусы) по исполнителю
+        Получает ВСЕ задачи (только активные статусы) по username исполнителя
         """
         try:
             api_endpoint = f"{self.base_url}/rest/api/2/search"
             
-            # JQL запрос для поиска ВСЕХ задач по исполнителю (без фильтра по статусу)
+            # Список активных статусов
+            active_statuses = [
+                "Ожидание поддержки",
+                "Ожидание клиента",
+                "Передано партнеру",
+                "В процессе",
+                "Эскалация (не разработка)",
+                "Фин блок",
+                "Согласование",
+                "ЗАПРОС НА ПАУЗУ",
+                "ETL",
+                "РЕГ БЛОК",
+                "Претензионный",
+                "ЮР БЛОК",
+                "ВНЕДРЕНИЕ",
+                "РЕКА",
+                "В разработку",
+                "Пауза"
+            ]
+            
+            # Формируем строку статусов для JQL
+            statuses_str = ', '.join([f'"{s}"' for s in active_statuses])
+            
+            # JQL запрос для поиска задач по исполнителю и статусам
             jql_query = f'''
             project = ZZ 
-            AND assignee = "{assignee_name}"
+            AND assignee = "{username}"
+            AND status IN ({statuses_str})
             ORDER BY created DESC
             '''
             
@@ -139,7 +163,8 @@ class TaskAPIClient:
                 "Host": "support.sbertroika.ru"
             }
             
-            logger.info(f"📡 Запрос к Jira API для пользователя {assignee_name}")
+            logger.info(f"📡 Запрос к Jira API для пользователя {username}")
+            logger.info(f"📋 JQL: {jql_query.strip()}")
             
             connector = aiohttp.TCPConnector(family=socket.AF_INET)
             
@@ -153,10 +178,12 @@ class TaskAPIClient:
                     if response.status == 200:
                         data = await response.json()
                         tasks = self._parse_jira_response(data)
-                        logger.info(f"✅ Найдено задач для {assignee_name}: {len(tasks)}")
+                        logger.info(f"✅ Найдено задач для {username}: {len(tasks)}")
                         return tasks
                     else:
                         logger.error(f"❌ Ошибка Jira API: статус {response.status}")
+                        error_text = await response.text()
+                        logger.error(f"Ответ: {error_text[:500]}")
                         return []
                         
         except Exception as e:
