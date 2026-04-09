@@ -22,7 +22,7 @@ from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 
 import config
 from api_client import TaskAPIClient
-from employees import find_employee_by_name, get_all_telegram_mentions, EMPLOYEES
+from employees import find_employee_by_name, get_all_telegram_mentions, EMPLOYEES, find_employees_by_lastname
 
 # Настройка логирования
 logging.basicConfig(
@@ -406,6 +406,109 @@ class SLABot:
             excel_bytes.name = f"sla_report_error.xlsx"
             return excel_bytes
     
+    async def _generate_request_excel_report(self, tasks: list, employee_name: str = None) -> io.BytesIO:
+        """
+        Генерирует Excel файл с отчётом по задачам для команды /request
+        Столбцы: ID, Тип, Название, Статус, Создана, Дедлайн, Исполнитель, Ссылка
+        """
+        logger.info(f"📊 Генерация персонального Excel для {len(tasks)} задач")
+        
+        if not tasks:
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "Задачи"
+            ws.cell(row=1, column=1, value="Нет задач для отображения")
+            excel_bytes = io.BytesIO()
+            wb.save(excel_bytes)
+            excel_bytes.seek(0)
+            excel_bytes.name = f"tasks_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+            return excel_bytes
+        
+        try:
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "Задачи"
+            
+            # Заголовки
+            headers = [
+                'ID задачи',
+                'Тип задачи',
+                'Название',
+                'Статус',
+                'Создана',
+                'Дедлайн',
+                'Исполнитель',
+                'Ссылка'
+            ]
+            
+            for col, header in enumerate(headers, 1):
+                ws.cell(row=1, column=col, value=header)
+            
+            # Данные
+            for row, task in enumerate(tasks, 2):
+                # Получаем тип задачи из raw_data
+                issue_type = "Неизвестно"
+                if 'raw_data' in task:
+                    fields = task['raw_data'].get('fields', {})
+                    issue_type_data = fields.get('issuetype', {})
+                    issue_type = issue_type_data.get('name', 'Неизвестно')
+                
+                # Форматируем дату создания
+                created_date = "—"
+                if 'created' in task and task['created']:
+                    try:
+                        created_str = task['created']
+                        if 'T' in created_str:
+                            created_str = created_str.split('+')[0].split('.')[0]
+                            created_dt = datetime.strptime(created_str, '%Y-%m-%dT%H:%M:%S')
+                            created_date = created_dt.strftime('%d.%m.%Y %H:%M')
+                    except:
+                        created_date = str(task['created'])[:16]
+                
+                # Записываем данные
+                ws.cell(row=row, column=1, value=task['id'])
+                ws.cell(row=row, column=2, value=issue_type)
+                ws.cell(row=row, column=3, value=task['title'][:100])
+                ws.cell(row=row, column=4, value=task['status'])
+                ws.cell(row=row, column=5, value=created_date)
+                ws.cell(row=row, column=6, value=task['due_date'].strftime('%d.%m.%Y %H:%M') if task['due_date'] else '—')
+                ws.cell(row=row, column=7, value=task['assignee'])
+                ws.cell(row=row, column=8, value=task['url'])
+            
+            # Автоширина
+            ws.column_dimensions['A'].width = 12
+            ws.column_dimensions['B'].width = 15
+            ws.column_dimensions['C'].width = 50
+            ws.column_dimensions['D'].width = 20
+            ws.column_dimensions['E'].width = 16
+            ws.column_dimensions['F'].width = 16
+            ws.column_dimensions['G'].width = 25
+            ws.column_dimensions['H'].width = 40
+            
+            excel_bytes = io.BytesIO()
+            wb.save(excel_bytes)
+            excel_bytes.seek(0)
+            
+            if employee_name:
+                safe_name = employee_name.replace(' ', '_').replace('@', '')
+                excel_bytes.name = f"tasks_{safe_name}_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+            else:
+                excel_bytes.name = f"tasks_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+            
+            logger.info(f"✅ Персональный Excel отчёт сгенерирован")
+            return excel_bytes
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка при генерации персонального Excel: {e}")
+            wb = Workbook()
+            ws = wb.active
+            ws.cell(row=1, column=1, value=f"Ошибка генерации отчёта: {str(e)}")
+            excel_bytes = io.BytesIO()
+            wb.save(excel_bytes)
+            excel_bytes.seek(0)
+            excel_bytes.name = f"tasks_error.xlsx"
+            return excel_bytes
+    
     def _format_time(self, hours: float) -> str:
         """Форматирует время до дедлайна"""
         if hours < 0:
@@ -471,7 +574,8 @@ class SLABot:
                     "priority": fields.get('priority', {}).get('name') if fields.get('priority') else None,
                     "url": f"{self.api_client.base_url}/browse/{task_data.get('key')}",
                     "due_date_source": sla_source,
-                    "created": fields.get('created')
+                    "created": fields.get('created'),
+                    "raw_data": task_data
                 }
                 return task
             return None
@@ -532,6 +636,7 @@ class SLABot:
                                 "📋 Доступные команды:\n"
                                 "/alarm - показать новые задачи с истекающим SLA\n"
                                 "/checking_dep - сформировать Excel отчёт по задачам отдела\n"
+                                "/request - выгрузить задачи сотрудника по фамилии (например: /request Бухвиц)\n"
                                 "/check - проверить конкретную задачу (Например: /check ZZ-123456)"
                             )
                         )
@@ -541,6 +646,7 @@ class SLABot:
                             "🤖 Команды бота:\n\n"
                             "/alarm - показать новые задачи с истекающим SLA\n"
                             "/checking_dep - сформировать Excel отчёт по задачам отдела\n"
+                            "/request - выгрузить задачи сотрудника по фамилии (например: /request Бухвиц)\n"
                             "/check - проверить конкретную задачу (Например: /check ZZ-12345)"
                         )
                         await self.bot.send_message(
@@ -627,6 +733,67 @@ class SLABot:
                         
                         logger.info(f"✅ Отправлен Excel отчёт с {len(dep_tasks)} задачами")
                     
+                    elif base_command == '/request':
+                        # Проверяем аргументы
+                        if len(parts) < 2:
+                            await self.bot.send_message(
+                                chat_id=chat_id,
+                                text="❌ Укажите фамилию сотрудника\n\nПример: /request Бухвиц"
+                            )
+                            continue
+                        
+                        lastname = parts[1]
+                        await self.bot.send_message(
+                            chat_id=chat_id,
+                            text=f"🔍 Ищу задачи сотрудников с фамилией '{lastname}'..."
+                        )
+                        
+                        # Ищем сотрудников по фамилии
+                        employees_found = find_employees_by_lastname(lastname)
+                        
+                        if not employees_found:
+                            await self.bot.send_message(
+                                chat_id=chat_id,
+                                text=f"❌ Сотрудники с фамилией '{lastname}' не найдены в базе"
+                            )
+                            continue
+                        
+                        # Получаем задачи из Jira
+                        tasks = await self.api_client.get_tasks()
+                        
+                        # Собираем задачи для найденных сотрудников
+                        all_user_tasks = []
+                        for emp in employees_found:
+                            for task in tasks:
+                                if find_employee_by_name(task['assignee']) == emp:
+                                    task_copy = task.copy()
+                                    task_copy['employee_name'] = emp['full_name']
+                                    all_user_tasks.append(task_copy)
+                        
+                        if not all_user_tasks:
+                            await self.bot.send_message(
+                                chat_id=chat_id,
+                                text=f"✅ У сотрудников с фамилией '{lastname}' нет активных задач"
+                            )
+                            continue
+                        
+                        # Сортируем по дедлайну
+                        all_user_tasks.sort(key=lambda x: x['hours_until_due'])
+                        
+                        # Генерируем персональный Excel
+                        excel_file = await self._generate_request_excel_report(all_user_tasks, lastname)
+                        
+                        # Формируем список найденных сотрудников
+                        emp_names = ", ".join([e['full_name'] for e in employees_found])
+                        
+                        await self.bot.send_document(
+                            chat_id=chat_id,
+                            document=InputFile(excel_file, filename=excel_file.name),
+                            caption=f"📊 Задачи сотрудников: {emp_names}\nВсего задач: {len(all_user_tasks)}"
+                        )
+                        
+                        logger.info(f"✅ Отправлен персональный Excel отчёт для фамилии '{lastname}' с {len(all_user_tasks)} задачами")
+                    
                     elif base_command == '/check':
                         if len(parts) < 2:
                             await self.bot.send_message(
@@ -660,6 +827,13 @@ class SLABot:
                         
                         assignee_formatted = self._format_assignee(task['assignee'])
                         
+                        # Получаем тип задачи
+                        issue_type = "Неизвестно"
+                        if 'raw_data' in task:
+                            fields = task['raw_data'].get('fields', {})
+                            issue_type_data = fields.get('issuetype', {})
+                            issue_type = issue_type_data.get('name', 'Неизвестно')
+                        
                         created_date = "неизвестно"
                         if 'created' in task and task['created']:
                             try:
@@ -676,6 +850,7 @@ class SLABot:
                         
                         task_info = (
                             f"📌 Задача: {task['id']}\n"
+                            f"📋 Тип: {issue_type}\n"
                             f"📋 Название: {task['title']}\n"
                             f"🔗 Ссылка: {task['url']}\n\n"
                             f"👤 Исполнитель: {assignee_formatted}\n"
