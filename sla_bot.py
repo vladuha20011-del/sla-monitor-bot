@@ -732,8 +732,7 @@ class SLABot:
                             chat_id=chat_id,
                             document=InputFile(excel_file, filename=excel_file.name),
                             caption=f"📊 ВСЕ задачи сотрудников: {emp_names}\n"
-                                    f"📈 Всего задач: {len(all_user_tasks)}\n"
-                                    f"📋 {status_summary}"
+                                    f"📈 Всего задач: {len(all_user_tasks)}"
                         )
                         
                         logger.info(f"✅ Отправлен полный Excel отчёт для фамилии '{lastname}' с {len(all_user_tasks)} задачами")
