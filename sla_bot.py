@@ -197,6 +197,15 @@ class SLABot:
             else:
                 mention = f"{task['assignee']}"
             
+            # Проверяем, была ли задача переоткрыта
+            was_reopened = False
+            reopen_date = None
+            try:
+                was_reopened, reopen_date = await self.api_client.get_reopen_info(task['id'])
+            except Exception as e:
+                logger.debug(f"Ошибка получения истории для {task['id']}: {e}")
+            
+            # Формируем время и статус
             hours_left = task['hours_until_due']
             time_str = self._format_time(hours_left)
             sla_status = self._get_sla_status(hours_left)
@@ -212,18 +221,43 @@ class SLABot:
                 except:
                     created_date = str(task['created'])[:16]
             
+            # Добавляем задачу в общее сообщение
             message += (
                 f"📌 Задача: {task['id']}\n"
                 f"🔗 Ссылка: {task['url']}\n"
                 f"📋 Название: {task['title']}\n"
                 f"👤 Исполнитель: {mention}\n"
                 f"📅 Создана: {created_date}\n"
-                f"⏰ Дедлайн: {task['due_date'].strftime('%d.%m.%Y %H:%M')}\n"
-                f"⌛ Осталось: {time_str}\n"
+            )
+            
+            # Добавляем информацию о переоткрытии, если есть
+            if was_reopened and reopen_date:
+                try:
+                    # Парсим дату переоткрытия
+                    reopen_dt = datetime.fromisoformat(reopen_date.replace('Z', '+00:00'))
+                    reopen_str = reopen_dt.strftime('%d.%m.%Y %H:%M')
+                    message += f"🔄 Переоткрыта: {reopen_str}\n"
+                except Exception as e:
+                    logger.debug(f"Ошибка парсинга даты переоткрытия: {e}")
+            
+            # Добавляем оставшееся время
+            if task.get('remaining_text'):
+                message += f"⏰ Осталось на решение: {task['remaining_text']}\n"
+            else:
+                message += f"⏰ Дедлайн: {task['due_date'].strftime('%d.%m.%Y %H:%M')}\n"
+                message += f"⌛ Осталось: {time_str}\n"
+            
+            message += (
                 f"📊 {sla_status}\n"
                 f"📈 Статус: {task['status']}\n"
-                f"🎯 Приоритет: {task['priority'] or 'Не указан'}\n\n"
+                f"🎯 Приоритет: {task['priority'] or 'Не указан'}\n"
             )
+            
+            # Добавляем примечание о переоткрытии
+            if was_reopened:
+                message += f"\nℹ️ Задача была переоткрыта!\n"
+            
+            message += "\n"
             
             if i < len(tasks) - 1:
                 message += f"{'—' * 45}\n\n"
@@ -349,10 +383,7 @@ class SLABot:
             return excel_bytes
     
     async def _generate_request_excel_report(self, tasks: list, lastname: str = None) -> io.BytesIO:
-        """
-        Генерирует Excel файл с отчётом по задачам для команды /request
-        Столбцы: ID, Тип, Название, Статус, Создана, Дедлайн, Исполнитель, Ссылка
-        """
+        """Генерирует Excel файл с отчётом по задачам для команды /request"""
         logger.info(f"📊 Генерация персонального Excel для {len(tasks)} задач")
         
         if not tasks:
@@ -690,23 +721,15 @@ class SLABot:
                         
                         all_user_tasks = []
                         for emp in employees_found:
-                            logger.info(f"🔍 Ищу задачи для {emp['full_name']} (username: {emp.get('username', 'нет')})")
+                            if 'username' not in emp:
+                                logger.warning(f"Для {emp['full_name']} не указан username")
+                                continue
                             
-                            # Пробуем поиск по полному имени
-                            tasks = await self.api_client.get_all_tasks_by_user(emp['full_name'])
-                            logger.info(f"   Найдено задач по полному имени: {len(tasks)}")
-                            
-                            # Если не нашло, пробуем поиск по логину
-                            if not tasks and 'username' in emp:
-                                tasks = await self.api_client.get_all_tasks_by_user(emp['username'])
-                                logger.info(f"   Найдено задач по логину: {len(tasks)}")
-                            
+                            tasks = await self.api_client.get_all_tasks_by_user(emp['username'])
                             for task in tasks:
                                 task_copy = task.copy()
                                 task_copy['employee_name'] = emp['full_name']
                                 all_user_tasks.append(task_copy)
-                        
-                        logger.info(f"📊 Всего собрано задач: {len(all_user_tasks)}")
                         
                         if not all_user_tasks:
                             await self.bot.send_message(
@@ -719,7 +742,7 @@ class SLABot:
                         
                         excel_file = await self._generate_request_excel_report(all_user_tasks, lastname)
                         
-                        emp_names = ", ".join([e['full_name'] for e in employees_found])
+                        emp_names = ", ".join([e['full_name'] for e in employees_found if 'username' in e])
                         
                         status_counts = {}
                         for task in all_user_tasks:
@@ -732,7 +755,8 @@ class SLABot:
                             chat_id=chat_id,
                             document=InputFile(excel_file, filename=excel_file.name),
                             caption=f"📊 ВСЕ задачи сотрудников: {emp_names}\n"
-                                    f"📈 Всего задач: {len(all_user_tasks)}"
+                                    f"📈 Всего задач: {len(all_user_tasks)}\n"
+                                    f"📋 {status_summary}"
                         )
                         
                         logger.info(f"✅ Отправлен полный Excel отчёт для фамилии '{lastname}' с {len(all_user_tasks)} задачами")
