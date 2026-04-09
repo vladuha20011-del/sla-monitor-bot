@@ -871,7 +871,10 @@ class SLABot:
                         
                         # Добавляем примечание о переоткрытии
                         if task.get('was_reopened'):
-                            task_info += f"\n\nℹ️ Задача была переоткрыта!"
+                            if not task.get('remaining_text') and task.get('due_date'):
+                                task_info += f"\n\nℹ️ Задача была переоткрыта! SLA не был перезапущен"
+                            else:
+                                task_info += f"\n\nℹ️ Задача была переоткрыта!"
                         
                         await self.bot.send_message(
                             chat_id=chat_id,
