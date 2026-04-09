@@ -259,7 +259,7 @@ class SLABot:
                 f"🎯 Приоритет: {task['priority'] or 'Не указан'}\n"
             )
             
-            # Добавляем примечание о переоткрытии
+            # Добавляем примечание о переоткрытии (только одна строка!)
             if was_reopened:
                 if not task.get('remaining_text') and task.get('due_date'):
                     message += f"\nℹ️ Задача была переоткрыта! SLA не был перезапущен\n"
@@ -869,7 +869,7 @@ class SLABot:
                             f"🎯 Приоритет: {task['priority'] or 'Не указан'}"
                         )
                         
-                        # Добавляем примечание о переоткрытии
+                        # Добавляем примечание о переоткрытии (только одна строка!)
                         if task.get('was_reopened'):
                             if not task.get('remaining_text') and task.get('due_date'):
                                 task_info += f"\n\nℹ️ Задача была переоткрыта! SLA не был перезапущен"
