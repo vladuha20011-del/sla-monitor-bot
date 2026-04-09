@@ -526,32 +526,41 @@ class SLABot:
             fields = task_data.get('fields', {})
             assignee_data = fields.get('assignee')
             assignee_name = self.api_client._extract_assignee(assignee_data)
-            due_date, sla_source = self.api_client._extract_sla_date(fields)
             
+            # Пытаемся получить дату SLA, если нет — используем None
+            due_date, sla_source, remaining_text = self.api_client._extract_sla_date(fields)
+            
+            now = datetime.now()
             if due_date:
-                now = datetime.now()
                 if due_date.tzinfo is not None:
                     due_date = due_date.replace(tzinfo=None)
                 hours_until_due = (due_date - now).total_seconds() / 3600
-                
-                task = {
-                    "id": task_data.get('key'),
-                    "key": task_data.get('key'),
-                    "title": fields.get('summary', 'Без названия'),
-                    "assignee": assignee_name,
-                    "assignee_raw": assignee_data,
-                    "due_date": due_date,
-                    "hours_until_due": hours_until_due,
-                    "should_notify": hours_until_due <= config.SLA_HOURS,
-                    "status": fields.get('status', {}).get('name') if fields.get('status') else 'Неизвестно',
-                    "status_id": fields.get('status', {}).get('id') if fields.get('status') else None,
-                    "priority": fields.get('priority', {}).get('name') if fields.get('priority') else None,
-                    "url": f"{self.api_client.base_url}/browse/{task_data.get('key')}",
-                    "due_date_source": sla_source,
-                    "created": fields.get('created'),
-                    "raw_data": task_data
-                }
-                return task
+            else:
+                # Если нет даты SLA, ставим большое число (не уведомляем)
+                hours_until_due = 9999
+            
+            task = {
+                "id": task_data.get('key'),
+                "key": task_data.get('key'),
+                "title": fields.get('summary', 'Без названия'),
+                "assignee": assignee_name,
+                "assignee_raw": assignee_data,
+                "due_date": due_date,
+                "remaining_text": remaining_text,
+                "hours_until_due": hours_until_due,
+                "should_notify": False,  # Не уведомляем, так как нет SLA
+                "status": fields.get('status', {}).get('name') if fields.get('status') else 'Неизвестно',
+                "status_id": fields.get('status', {}).get('id') if fields.get('status') else None,
+                "priority": fields.get('priority', {}).get('name') if fields.get('priority') else None,
+                "url": f"{self.api_client.base_url}/browse/{task_data.get('key')}",
+                "due_date_source": sla_source,
+                "created": fields.get('created'),
+                "raw_data": task_data
+            }
+            return task
+            
+        except Exception as e:
+            logger.error(f"Ошибка при получении задачи {task_key}: {e}")
             return None
         except Exception as e:
             logger.error(f"Ошибка при получении задачи {task_key}: {e}")
