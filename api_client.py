@@ -411,3 +411,70 @@ async def test_jira_client():
 
 if __name__ == "__main__":
     asyncio.run(test_jira_client())
+
+    #для команды /request
+    async def get_all_tasks_by_user(self, assignee_name: str, max_results: int = 500) -> List[Dict[str, Any]]:
+        """
+        Получает ВСЕ задачи (любые статусы) по исполнителю
+        """
+        try:
+            api_endpoint = f"{self.base_url}/rest/api/2/search"
+            
+            # JQL запрос для поиска ВСЕХ задач по исполнителю (без фильтра по статусу)
+            jql_query = f'''
+            project = ZZ 
+            AND assignee = "{assignee_name}"
+            ORDER BY created DESC
+            '''
+            
+            params = {
+                "jql": jql_query.strip(),
+                "maxResults": max_results,
+                "fields": [
+                    "summary", 
+                    "assignee", 
+                    "duedate", 
+                    "status", 
+                    "priority", 
+                    "description", 
+                    "created",
+                    "updated",
+                    "issuetype",
+                    "customfield_10611",
+                    "customfield_10612",
+                    "customfield_10303",
+                    "customfield_10305",
+                    "customfield_10606",
+                    "customfield_11502",
+                ]
+            }
+            
+            headers = {
+                "Authorization": f"Bearer {self.api_token}",
+                "Accept": "application/json",
+                "Host": "support.sbertroika.ru"
+            }
+            
+            logger.info(f"📡 Запрос к Jira API для пользователя {assignee_name}")
+            
+            connector = aiohttp.TCPConnector(family=socket.AF_INET)
+            
+            async with aiohttp.ClientSession(connector=connector, timeout=self.timeout) as session:
+                async with session.get(
+                    api_endpoint, 
+                    headers=headers,
+                    params=params
+                ) as response:
+                    
+                    if response.status == 200:
+                        data = await response.json()
+                        tasks = self._parse_jira_response(data)
+                        logger.info(f"✅ Найдено задач для {assignee_name}: {len(tasks)}")
+                        return tasks
+                    else:
+                        logger.error(f"❌ Ошибка Jira API: статус {response.status}")
+                        return []
+                        
+        except Exception as e:
+            logger.error(f"❌ Ошибка при запросе к Jira API: {e}", exc_info=True)
+            return []
