@@ -1,137 +1,119 @@
 """
 Список сотрудников для SLA мониторинга
-Заполни реальными данными своих 17 сотрудников
-Каждый сотрудник должен иметь:
-- full_name: как в системе (для поиска)
-- telegram_username: для упоминаний в Telegram
-- email: для связи с данными из API (если в API есть email)
 """
 
 EMPLOYEES = [
-    # Сотрудник 1
     {
         "id": 1,
-        "full_name": "Бухвиц Владислав Александрович",  # Полное ФИО из системы
-        "search_names": ["бухвиц", "владислав"],    # Слова для поиска (фамилия + имя) в нижнем регистре
-        "telegram_username": "@armagedon1820",      # Telegram username для @упоминания
-        "email": "bukhvits-va@sbertroika.ru"        # Email из системы (если есть)
+        "full_name": "Бухвиц Владислав Александрович",
+        "search_names": ["бухвиц", "владислав"],
+        "telegram_username": "@armagedon1820",
+        "email": "bukhvits-va@sbertroika.ru",
+        "username": "bukhvits-va"
     },
-    
-    # Сотрудник 2
     {
         "id": 2,
         "full_name": "Ягубов Сергей Фарман оглы",
         "search_names": ["ягубов", "сергей"],
         "telegram_username": "@happy_zerg",
-        "email": "yagubov-sf@sbertroika.ru"
+        "email": "yagubov-sf@sbertroika.ru",
+        "username": "yagubov-sf"
     },
-    
-    # Сотрудник 3
     {
         "id": 3,
         "full_name": "Тыркова Елена Григорьевна",
         "search_names": ["тыркова", "елена"],
         "telegram_username": "@Lenin30stm",
-        "email": "tirkova-eg@sbertroika.ru"
+        "email": "tirkova-eg@sbertroika.ru",
+        "username": "tirkova-eg"
     },
-    
-    # Сотрудник 4
     {
         "id": 4,
         "full_name": "Хрусталев Дмитрий Александрович",
         "search_names": ["хрусталев", "дмитрий"],
         "telegram_username": "@xrystalevdmitrii",
-        "email": "hrustalev-da@sbertroika.ru"
+        "email": "hrustalev-da@sbertroika.ru",
+        "username": "hrustalev-da"
     },
-    
-    # Сотрудник 5
     {
         "id": 5,
         "full_name": "Хасанов Ильгиз Раушанович",
         "search_names": ["хасанов", "ильгиз"],
         "telegram_username": "@Don1Kor",
-        "email": "hasanov-ir@sbertroika.ru"
+        "email": "hasanov-ir@sbertroika.ru",
+        "username": "hasanov-ir"
     },
-    
-    # Сотрудник 6
     {
         "id": 6,
         "full_name": "Хайрутдинов Нияз Ринурович",
         "search_names": ["хайрутдинов", "нияз"],
         "telegram_username": "@khairutdinovn",
-        "email": "khayrutdinov-nr@sbertroika.ru"
+        "email": "khayrutdinov-nr@sbertroika.ru",
+        "username": "khayrutdinov-nr"
     },
-    
-    # Сотрудник 7
     {
         "id": 7,
         "full_name": "Саттаров Имиль Ильшатович",
         "search_names": ["саттаров", "имиль"],
         "telegram_username": "@imilst",
-        "email": "sattarov-ii@sbertroika.ru"
+        "email": "sattarov-ii@sbertroika.ru",
+        "username": "sattarov-ii"
     },
-    
-    # Сотрудник 8
     {
         "id": 8,
         "full_name": "Сарибекян Раффи Ашотович",
         "search_names": ["сарибекян", "раффи"],
         "telegram_username": "@raffisar",
-        "email": "saribekyan-ra@sbertroika.ru"
+        "email": "saribekyan-ra@sbertroika.ru",
+        "username": "saribekyan-ra"
     },
-    
-    # Сотрудник 9
     {
         "id": 9,
         "full_name": "Матовников Александр Сергеевич",
         "search_names": ["матовников", "александр"],
         "telegram_username": "@autti5",
-        "email": "matovnikov-as@sbertroika.ru"
+        "email": "matovnikov-as@sbertroika.ru",
+        "username": "matovnikov-as"
     },
-    
-    # Сотрудник 10
     {
         "id": 10,
         "full_name": "Малеев Михаил Алексеевич",
         "search_names": ["малеев", "михаил"],
         "telegram_username": "@hulobvee",
-        "email": "maleev-ma@sbertroika.ru"
+        "email": "maleev-ma@sbertroika.ru",
+        "username": "maleev-ma"
     },
-    
-    # Сотрудник 11
     {
         "id": 11,
         "full_name": "Веселков Даниил Владимирович",
         "search_names": ["веселков", "даниил"],
         "telegram_username": "@veselkov_st",
-        "email": "veselkov-dv@sbertroika.ru"
+        "email": "veselkov-dv@sbertroika.ru",
+        "username": "veselkov-dv"
     },
-    
-    # Сотрудник 12
     {
         "id": 12,
         "full_name": "Мифтахутдинов Даниил Рахимович",
         "search_names": ["мифтахутдинов", "даниил"],
         "telegram_username": "@speic1",
-        "email": "miftakhutdinov-dr@sbertroika.ru"
+        "email": "miftakhutdinov-dr@sbertroika.ru",
+        "username": "miftakhutdinov-dr"
     },
-    
-    # Сотрудник 13
     {
         "id": 13,
         "full_name": "Папов Ильяс Бесланович",
         "search_names": ["папов", "ильяс"],
         "telegram_username": "@roiILyasik",
-        "email": "papov-ib@sbertroika.ru"
+        "email": "papov-ib@sbertroika.ru",
+        "username": "papov-ib"
     },
-    
-    # Сотрудник 14
     {
         "id": 14,
         "full_name": "Корженков Александр Дмитриевич",
         "search_names": ["корженков", "александр"],
         "telegram_username": "@korzhenkovad",
-        "email": "korzhenkov-ad@sbertroika.ru"
+        "email": "korzhenkov-ad@sbertroika.ru",
+        "username": "korzhenkov-ad"
     }
 ]
 
