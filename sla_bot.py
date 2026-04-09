@@ -406,7 +406,7 @@ class SLABot:
             excel_bytes.name = f"sla_report_error.xlsx"
             return excel_bytes
     
-    async def _generate_request_excel_report(self, tasks: list, employee_name: str = None) -> io.BytesIO:
+    async def _generate_request_excel_report(self, tasks: list, lastname: str = None) -> io.BytesIO:
         """
         Генерирует Excel файл с отчётом по задачам для команды /request
         Столбцы: ID, Тип, Название, Статус, Создана, Дедлайн, Исполнитель, Ссылка
@@ -441,8 +441,16 @@ class SLABot:
                 'Ссылка'
             ]
             
+            # Стили для заголовков
+            header_font = Font(bold=True, color="FFFFFF")
+            header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+            header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            
             for col, header in enumerate(headers, 1):
-                ws.cell(row=1, column=col, value=header)
+                cell = ws.cell(row=1, column=col, value=header)
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.alignment = header_alignment
             
             # Данные
             for row, task in enumerate(tasks, 2):
@@ -465,13 +473,18 @@ class SLABot:
                     except:
                         created_date = str(task['created'])[:16]
                 
+                # Форматируем дедлайн
+                due_date_str = "—"
+                if task.get('due_date'):
+                    due_date_str = task['due_date'].strftime('%d.%m.%Y %H:%M')
+                
                 # Записываем данные
                 ws.cell(row=row, column=1, value=task['id'])
                 ws.cell(row=row, column=2, value=issue_type)
                 ws.cell(row=row, column=3, value=task['title'][:100])
                 ws.cell(row=row, column=4, value=task['status'])
                 ws.cell(row=row, column=5, value=created_date)
-                ws.cell(row=row, column=6, value=task['due_date'].strftime('%d.%m.%Y %H:%M') if task['due_date'] else '—')
+                ws.cell(row=row, column=6, value=due_date_str)
                 ws.cell(row=row, column=7, value=task['assignee'])
                 ws.cell(row=row, column=8, value=task['url'])
             
@@ -489,8 +502,8 @@ class SLABot:
             wb.save(excel_bytes)
             excel_bytes.seek(0)
             
-            if employee_name:
-                safe_name = employee_name.replace(' ', '_').replace('@', '')
+            if lastname:
+                safe_name = lastname.replace(' ', '_').replace('@', '')
                 excel_bytes.name = f"tasks_{safe_name}_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
             else:
                 excel_bytes.name = f"tasks_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
@@ -745,7 +758,7 @@ class SLABot:
                         lastname = parts[1]
                         await self.bot.send_message(
                             chat_id=chat_id,
-                            text=f"🔍 Ищу задачи сотрудников с фамилией '{lastname}'..."
+                            text=f"🔍 Ищу ВСЕ задачи сотрудников с фамилией '{lastname}'..."
                         )
                         
                         # Ищем сотрудников по фамилии
@@ -758,27 +771,26 @@ class SLABot:
                             )
                             continue
                         
-                        # Получаем задачи из Jira
-                        tasks = await self.api_client.get_tasks()
-                        
-                        # Собираем задачи для найденных сотрудников
+                        # Собираем задачи для каждого найденного сотрудника
                         all_user_tasks = []
                         for emp in employees_found:
+                            # Получаем ВСЕ задачи (без фильтра по статусу)
+                            tasks = await self.api_client.get_all_tasks_by_user(emp['full_name'])
+                            
                             for task in tasks:
-                                if find_employee_by_name(task['assignee']) == emp:
-                                    task_copy = task.copy()
-                                    task_copy['employee_name'] = emp['full_name']
-                                    all_user_tasks.append(task_copy)
+                                task_copy = task.copy()
+                                task_copy['employee_name'] = emp['full_name']
+                                all_user_tasks.append(task_copy)
                         
                         if not all_user_tasks:
                             await self.bot.send_message(
                                 chat_id=chat_id,
-                                text=f"✅ У сотрудников с фамилией '{lastname}' нет активных задач"
+                                text=f"✅ У сотрудников с фамилией '{lastname}' нет задач"
                             )
                             continue
                         
-                        # Сортируем по дедлайну
-                        all_user_tasks.sort(key=lambda x: x['hours_until_due'])
+                        # Сортируем по дате создания (новые сверху)
+                        all_user_tasks.sort(key=lambda x: x.get('created', ''), reverse=True)
                         
                         # Генерируем персональный Excel
                         excel_file = await self._generate_request_excel_report(all_user_tasks, lastname)
@@ -786,13 +798,23 @@ class SLABot:
                         # Формируем список найденных сотрудников
                         emp_names = ", ".join([e['full_name'] for e in employees_found])
                         
+                        # Подсчитываем задачи по статусам
+                        status_counts = {}
+                        for task in all_user_tasks:
+                            status = task.get('status', 'Неизвестно')
+                            status_counts[status] = status_counts.get(status, 0) + 1
+                        
+                        status_summary = ", ".join([f"{k}: {v}" for k, v in status_counts.items()])
+                        
                         await self.bot.send_document(
                             chat_id=chat_id,
                             document=InputFile(excel_file, filename=excel_file.name),
-                            caption=f"📊 Задачи сотрудников: {emp_names}\nВсего задач: {len(all_user_tasks)}"
+                            caption=f"📊 ВСЕ задачи сотрудников: {emp_names}\n"
+                                    f"📈 Всего задач: {len(all_user_tasks)}\n"
+                                    f"📋 {status_summary}"
                         )
                         
-                        logger.info(f"✅ Отправлен персональный Excel отчёт для фамилии '{lastname}' с {len(all_user_tasks)} задачами")
+                        logger.info(f"✅ Отправлен полный Excel отчёт для фамилии '{lastname}' с {len(all_user_tasks)} задачами")
                     
                     elif base_command == '/check':
                         if len(parts) < 2:
