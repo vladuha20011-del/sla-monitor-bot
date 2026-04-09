@@ -863,8 +863,14 @@ class SLABot:
                         else:
                             task_info += f"⏰ Дедлайн: не указан\n"
                         
+                        # Добавляем примечание о переоткрытии (ДО статуса задачи)
+                        if task.get('was_reopened'):
+                            if not task.get('remaining_text') and task.get('due_date'):
+                                task_info += f"ℹ️ Задача была переоткрыта! SLA не был перезапущен\n"
+                            else:
+                                task_info += f"ℹ️ Задача была переоткрыта!\n"
+                        
                         task_info += (
-                            f"📊 {sla_status}\n"
                             f"📈 Статус задачи: {task['status']}\n"
                             f"🎯 Приоритет: {task['priority'] or 'Не указан'}"
                         )
