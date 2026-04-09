@@ -233,7 +233,6 @@ class SLABot:
             # Добавляем информацию о переоткрытии, если есть
             if was_reopened and reopen_date:
                 try:
-                    # Парсим дату переоткрытия
                     reopen_dt = datetime.fromisoformat(reopen_date.replace('Z', '+00:00'))
                     reopen_str = reopen_dt.strftime('%d.%m.%Y %H:%M')
                     message += f"🔄 Переоткрыта: {reopen_str}\n"
@@ -539,6 +538,14 @@ class SLABot:
                 # Если нет даты SLA, ставим большое число (не уведомляем)
                 hours_until_due = 9999
             
+            # Проверяем, была ли задача переоткрыта
+            was_reopened = False
+            reopen_date = None
+            try:
+                was_reopened, reopen_date = await self.api_client.get_reopen_info(task_key)
+            except Exception as e:
+                logger.debug(f"Ошибка получения истории для {task_key}: {e}")
+            
             task = {
                 "id": task_data.get('key'),
                 "key": task_data.get('key'),
@@ -548,20 +555,19 @@ class SLABot:
                 "due_date": due_date,
                 "remaining_text": remaining_text,
                 "hours_until_due": hours_until_due,
-                "should_notify": False,  # Не уведомляем, так как нет SLA
+                "should_notify": False,
                 "status": fields.get('status', {}).get('name') if fields.get('status') else 'Неизвестно',
                 "status_id": fields.get('status', {}).get('id') if fields.get('status') else None,
                 "priority": fields.get('priority', {}).get('name') if fields.get('priority') else None,
                 "url": f"{self.api_client.base_url}/browse/{task_data.get('key')}",
                 "due_date_source": sla_source,
                 "created": fields.get('created'),
-                "raw_data": task_data
+                "raw_data": task_data,
+                "was_reopened": was_reopened,
+                "reopen_date": reopen_date
             }
             return task
             
-        except Exception as e:
-            logger.error(f"Ошибка при получении задачи {task_key}: {e}")
-            return None
         except Exception as e:
             logger.error(f"Ошибка при получении задачи {task_key}: {e}")
             return None
@@ -803,12 +809,6 @@ class SLABot:
                         
                         assignee_formatted = self._format_assignee(task['assignee'])
                         
-                        issue_type = "Неизвестно"
-                        if 'raw_data' in task:
-                            fields = task['raw_data'].get('fields', {})
-                            issue_type_data = fields.get('issuetype', {})
-                            issue_type = issue_type_data.get('name', 'Неизвестно')
-                        
                         created_date = "неизвестно"
                         if 'created' in task and task['created']:
                             try:
@@ -825,17 +825,39 @@ class SLABot:
                         
                         task_info = (
                             f"📌 Задача: {task['id']}\n"
-                            f"📋 Тип: {issue_type}\n"
                             f"📋 Название: {task['title']}\n"
                             f"🔗 Ссылка: {task['url']}\n\n"
                             f"👤 Исполнитель: {assignee_formatted}\n"
                             f"📅 Создана: {created_date}\n"
-                            f"⏰ Дедлайн: {task['due_date'].strftime('%d.%m.%Y %H:%M')}\n"
-                            f"⌛ Осталось: {self._format_time(hours)}\n"
+                        )
+                        
+                        # Добавляем информацию о переоткрытии
+                        if task.get('was_reopened') and task.get('reopen_date'):
+                            try:
+                                reopen_dt = datetime.fromisoformat(task['reopen_date'].replace('Z', '+00:00'))
+                                reopen_str = reopen_dt.strftime('%d.%m.%Y %H:%M')
+                                task_info += f"🔄 Переоткрыта: {reopen_str}\n"
+                            except:
+                                pass
+                        
+                        # Добавляем информацию о дедлайне
+                        if task.get('remaining_text'):
+                            task_info += f"⏰ Осталось на решение: {task['remaining_text']}\n"
+                        elif task.get('due_date'):
+                            task_info += f"⏰ Дедлайн: {task['due_date'].strftime('%d.%m.%Y %H:%M')}\n"
+                            task_info += f"⌛ Осталось: {self._format_time(hours)}\n"
+                        else:
+                            task_info += f"⏰ Дедлайн: не указан\n"
+                        
+                        task_info += (
                             f"📊 {sla_status}\n"
                             f"📈 Статус задачи: {task['status']}\n"
                             f"🎯 Приоритет: {task['priority'] or 'Не указан'}"
                         )
+                        
+                        # Добавляем примечание о переоткрытии
+                        if task.get('was_reopened'):
+                            task_info += f"\n\nℹ️ Задача была переоткрыта!"
                         
                         await self.bot.send_message(
                             chat_id=chat_id,
