@@ -191,6 +191,26 @@ def find_employee_by_email(email):
             return employee
     return None
 
+# Функция для поиска сотрудников по фамилии (для команды /request)
+def find_employees_by_lastname(lastname: str) -> list:
+    """
+    Ищет сотрудников по фамилии (частичное совпадение)
+    Возвращает список найденных сотрудников
+    """
+    lastname_lower = lastname.lower().strip()
+    found = []
+    
+    for employee in EMPLOYEES:
+        # Проверяем, содержится ли фамилия в full_name
+        if lastname_lower in employee['full_name'].lower():
+            found.append(employee)
+        # Также проверяем по search_names
+        elif any(lastname_lower in name for name in employee['search_names']):
+            if employee not in found:
+                found.append(employee)
+    
+    return found
+
 # Функция для получения всех Telegram username
 def get_all_telegram_mentions():
     """Возвращает строку со всеми @username через пробел"""
