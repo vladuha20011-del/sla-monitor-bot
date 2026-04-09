@@ -690,11 +690,23 @@ class SLABot:
                         
                         all_user_tasks = []
                         for emp in employees_found:
+                            logger.info(f"🔍 Ищу задачи для {emp['full_name']} (username: {emp.get('username', 'нет')})")
+                            
+                            # Пробуем поиск по полному имени
                             tasks = await self.api_client.get_all_tasks_by_user(emp['full_name'])
+                            logger.info(f"   Найдено задач по полному имени: {len(tasks)}")
+                            
+                            # Если не нашло, пробуем поиск по логину
+                            if not tasks and 'username' in emp:
+                                tasks = await self.api_client.get_all_tasks_by_user(emp['username'])
+                                logger.info(f"   Найдено задач по логину: {len(tasks)}")
+                            
                             for task in tasks:
                                 task_copy = task.copy()
                                 task_copy['employee_name'] = emp['full_name']
                                 all_user_tasks.append(task_copy)
+                        
+                        logger.info(f"📊 Всего собрано задач: {len(all_user_tasks)}")
                         
                         if not all_user_tasks:
                             await self.bot.send_message(
