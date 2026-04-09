@@ -261,7 +261,10 @@ class SLABot:
             
             # Добавляем примечание о переоткрытии
             if was_reopened:
-                message += f"\nℹ️ Задача была переоткрыта!\n"
+                if not task.get('remaining_text') and task.get('due_date'):
+                    message += f"\nℹ️ Задача была переоткрыта! SLA не был перезапущен\n"
+                else:
+                    message += f"\nℹ️ Задача была переоткрыта!\n"
             
             message += "\n"
             
