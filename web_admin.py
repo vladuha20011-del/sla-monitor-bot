@@ -40,12 +40,10 @@ except ImportError:
 
 @app.route('/')
 def index():
-    """Главная страница"""
     return render_template('index.html')
 
 @app.route('/login')
 def login():
-    """Страница входа"""
     return render_template('index.html')
 
 # ============ API: СОТРУДНИКИ ============
@@ -98,13 +96,19 @@ def api_update_settings():
 @app.route('/api/statuses')
 def api_get_statuses():
     statuses = db_manager.get_task_statuses(active_only=True)
-    return jsonify([{'name': s} for s in statuses])
+    return jsonify(statuses)
 
 @app.route('/api/statuses', methods=['POST'])
 def api_add_status():
     data = request.json
-    db_manager.add_task_status(data['name'])
+    db_manager.add_task_status(data['name'], data.get('notify_enabled', 1))
     return jsonify({'status': 'ok', 'message': 'Статус добавлен'})
+
+@app.route('/api/statuses/<name>', methods=['PUT'])
+def api_update_status(name):
+    data = request.json
+    db_manager.update_task_status(name, data.get('notify_enabled', 1))
+    return jsonify({'status': 'ok', 'message': 'Статус обновлён'})
 
 @app.route('/api/statuses/<name>', methods=['DELETE'])
 def api_delete_status(name):
@@ -115,14 +119,13 @@ def api_delete_status(name):
 
 @app.route('/api/templates')
 def api_get_templates():
-    templates = db_manager.get_all_templates()
+    templates = db_manager.get_all_templates_dict()
     return jsonify(templates)
 
 @app.route('/api/templates', methods=['POST'])
 def api_save_templates():
     data = request.json
-    for name, template in data.items():
-        db_manager.save_template(name, template)
+    db_manager.save_templates(data)
     return jsonify({'status': 'ok', 'message': 'Шаблоны сохранены'})
 
 # ============ API: ЛОГИ ============
@@ -190,7 +193,6 @@ def api_get_stats():
 
 @app.route('/api/restart', methods=['POST'])
 def api_restart_bot():
-    """Перезапустить бота"""
     try:
         logger.info("🔄 Перезапуск бота...")
         
@@ -216,7 +218,6 @@ def api_restart_bot():
 
 @app.route('/api/stop', methods=['POST'])
 def api_stop_bot():
-    """Остановить бота"""
     try:
         os.system('pkill -f "sla_bot.py"')
         logger.info("⏹ Бот остановлен")
