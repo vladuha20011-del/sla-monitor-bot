@@ -296,6 +296,10 @@ class SLABot:
             else:
                 assignee_display = task['assignee']
             
+            # Получаем статус SLA
+            hours = task.get('hours_until_due', 0)
+            sla_status_display = self._get_sla_status(hours)
+            
             # Формируем задачу по шаблону
             try:
                 task_display = task_format.format(
@@ -303,11 +307,12 @@ class SLABot:
                     title=task.get('title', 'Без названия'),
                     assignee=assignee_display,
                     due_date=task['due_date'].strftime('%d.%m.%Y %H:%M') if task.get('due_date') else 'не указан',
-                    remaining=self._format_time(task.get('hours_until_due', 0)),
+                    remaining=self._format_time(hours),
                     status=task.get('status', 'Неизвестно'),
                     priority=task.get('priority', 'Не указан'),
                     url=task.get('url', ''),
-                    created=task.get('created_formatted', 'неизвестно')
+                    created=task.get('created_formatted', 'неизвестно'),
+                    sla_status=sla_status_display
                 )
             except KeyError as e:
                 logger.error(f"❌ Ошибка форматирования: отсутствует переменная {e}")
