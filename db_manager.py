@@ -41,12 +41,13 @@ def init_db():
         )
     ''')
     
-    # Таблица статусов задач
+    # Таблица статусов задач (с флагом уведомления)
     c.execute('''
         CREATE TABLE IF NOT EXISTS task_statuses (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT UNIQUE,
-            is_active INTEGER DEFAULT 1
+            is_active INTEGER DEFAULT 1,
+            notify_enabled INTEGER DEFAULT 1
         )
     ''')
     
@@ -56,6 +57,7 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT UNIQUE,
             template TEXT,
+            description TEXT,
             is_active INTEGER DEFAULT 1
         )
     ''')
@@ -85,31 +87,49 @@ def init_db():
         c.execute('INSERT OR IGNORE INTO settings (key, value, description) VALUES (?, ?, ?)', 
                   (key, value, desc))
     
-    # Добавляем статусы по умолчанию
+    # Добавляем статусы по умолчанию (с уведомлениями)
     default_statuses = [
-        'Ожидание поддержки',
-        'Ожидание клиента',
-        'Передано партнеру',
-        'В процессе',
-        'Эскалация (не разработка)',
-        'Фин блок',
-        'Согласование',
-        'ЗАПРОС НА ПАУЗУ',
-        'ETL',
-        'РЕГ БЛОК',
-        'Претензионный',
-        'ЮР БЛОК',
-        'ВНЕДРЕНИЕ',
-        'РЕКА',
-        'В разработку',
-        'Пауза'
+        ('Ожидание поддержки', 1),
+        ('В процессе', 1),
+        ('Ожидание клиента', 0),
+        ('Передано партнеру', 0),
+        ('Эскалация (не разработка)', 0),
+        ('Фин блок', 0),
+        ('Согласование', 0),
+        ('ЗАПРОС НА ПАУЗУ', 0),
+        ('ETL', 0),
+        ('РЕГ БЛОК', 0),
+        ('Претензионный', 0),
+        ('ЮР БЛОК', 0),
+        ('ВНЕДРЕНИЕ', 0),
+        ('РЕКА', 0),
+        ('В разработку', 0),
+        ('Пауза', 0)
     ]
     
-    for status in default_statuses:
-        c.execute('INSERT OR IGNORE INTO task_statuses (name) VALUES (?)', (status,))
+    for status, notify in default_statuses:
+        c.execute('INSERT OR IGNORE INTO task_statuses (name, notify_enabled) VALUES (?, ?)', 
+                  (status, notify))
+    
+    # Добавляем шаблоны по умолчанию (из текущего кода)
+    default_templates = [
+        ('header', '⚠️ Внимание! Приближается SLA!', 'Заголовок уведомления'),
+        ('footer', 'Коллеги, обратите внимание!', 'Финальная фраза'),
+        ('task_format', '• {title} — исполнитель: {assignee}, дедлайн: {due_date} (осталось {remaining})', 'Формат задачи в рассылке'),
+        ('check_task_format', '📌 Задача: {id}\n📋 Название: {title}\n🔗 Ссылка: {url}\n\n👤 Исполнитель: {assignee}\n📅 Создана: {created}\n⏰ Осталось: {remaining}\n📈 Статус задачи: {status}\n🎯 Приоритет: {priority}', 'Формат задачи в /check'),
+        ('alarm_header', '⚠️ Внимание! Приближается SLA!', 'Заголовок для /alarm'),
+        ('alarm_footer', 'Коллеги, обратите внимание!', 'Финальная фраза для /alarm'),
+        ('request_caption', '📊 ВСЕ задачи сотрудников: {employees}\n📈 Всего задач: {total}\n📋 {status_summary}', 'Подпись для /request'),
+        ('checking_dep_caption', '📊 Отчёт по задачам отдела (всего: {total})', 'Подпись для /checking_dep')
+    ]
+    
+    for name, template, desc in default_templates:
+        c.execute('INSERT OR IGNORE INTO message_templates (name, template, description) VALUES (?, ?, ?)', 
+                  (name, template, desc))
     
     conn.commit()
     conn.close()
+
 
 # ============ РАБОТА С СОТРУДНИКАМИ ============
 
@@ -225,6 +245,7 @@ def get_all_telegram_mentions() -> str:
     employees = get_employees(active_only=True)
     return " ".join([emp['telegram_username'] for emp in employees])
 
+
 # ============ РАБОТА С НАСТРОЙКАМИ ============
 
 def get_settings() -> Dict[str, str]:
@@ -258,14 +279,15 @@ def update_settings(data: Dict[str, str]):
     conn.commit()
     conn.close()
 
+
 # ============ РАБОТА СО СТАТУСАМИ ============
 
-def get_task_statuses(active_only: bool = True) -> List[str]:
-    """Получить статусы задач"""
+def get_task_statuses(active_only: bool = True) -> List[Dict]:
+    """Получить статусы задач с флагом уведомления"""
     conn = get_db_connection()
     c = conn.cursor()
     
-    query = 'SELECT name FROM task_statuses'
+    query = 'SELECT name, notify_enabled, is_active FROM task_statuses'
     if active_only:
         query += ' WHERE is_active = 1'
     
@@ -273,13 +295,32 @@ def get_task_statuses(active_only: bool = True) -> List[str]:
     rows = c.fetchall()
     conn.close()
     
+    return [{'name': row['name'], 'notify_enabled': bool(row['notify_enabled']), 'is_active': bool(row['is_active'])} for row in rows]
+
+def get_notify_statuses() -> List[str]:
+    """Получить статусы, для которых включены уведомления"""
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute('SELECT name FROM task_statuses WHERE is_active = 1 AND notify_enabled = 1')
+    rows = c.fetchall()
+    conn.close()
+    
     return [row['name'] for row in rows]
 
-def add_task_status(name: str):
+def add_task_status(name: str, notify_enabled: int = 1):
     """Добавить статус задачи"""
     conn = get_db_connection()
     c = conn.cursor()
-    c.execute('INSERT OR IGNORE INTO task_statuses (name) VALUES (?)', (name,))
+    c.execute('INSERT OR IGNORE INTO task_statuses (name, notify_enabled) VALUES (?, ?)', 
+              (name, notify_enabled))
+    conn.commit()
+    conn.close()
+
+def update_task_status(name: str, notify_enabled: int):
+    """Обновить статус задачи (включить/выключить уведомления)"""
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute('UPDATE task_statuses SET notify_enabled = ? WHERE name = ?', (notify_enabled, name))
     conn.commit()
     conn.close()
 
@@ -295,6 +336,7 @@ def delete_task_status(name: str, soft: bool = True):
     
     conn.commit()
     conn.close()
+
 
 # ============ РАБОТА С ШАБЛОНАМИ ============
 
@@ -323,11 +365,36 @@ def get_all_templates() -> Dict[str, str]:
     """Получить все шаблоны"""
     conn = get_db_connection()
     c = conn.cursor()
+    c.execute('SELECT name, template, description FROM message_templates WHERE is_active = 1')
+    rows = c.fetchall()
+    conn.close()
+    
+    return {row['name']: {'template': row['template'], 'description': row['description']} for row in rows}
+
+def get_all_templates_dict() -> Dict[str, str]:
+    """Получить все шаблоны как словарь {name: template}"""
+    conn = get_db_connection()
+    c = conn.cursor()
     c.execute('SELECT name, template FROM message_templates WHERE is_active = 1')
     rows = c.fetchall()
     conn.close()
     
     return {row['name']: row['template'] for row in rows}
+
+def save_templates(data: Dict[str, str]):
+    """Сохранить несколько шаблонов"""
+    conn = get_db_connection()
+    c = conn.cursor()
+    
+    for name, template in data.items():
+        c.execute('''
+            INSERT OR REPLACE INTO message_templates (name, template, is_active)
+            VALUES (?, ?, 1)
+        ''', (name, template))
+    
+    conn.commit()
+    conn.close()
+
 
 # ============ СТАТИСТИКА ============
 
