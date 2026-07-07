@@ -111,6 +111,20 @@ class SLABot:
         self.notify_statuses = db_manager.get_notify_statuses()
         logger.info("🔄 Настройки перезагружены из БД")
     
+    def format_created_date(self, task: Dict) -> str:
+        """Форматирует дату создания задачи"""
+        created_date = "неизвестно"
+        if task.get('created'):
+            try:
+                created_str = task['created']
+                if 'T' in created_str:
+                    created_str = created_str.split('+')[0].split('.')[0]
+                    created_dt = datetime.strptime(created_str, '%Y-%m-%dT%H:%M:%S')
+                    created_date = created_dt.strftime('%d.%m.%Y %H:%M')
+            except:
+                created_date = str(task['created'])[:16]
+        return created_date
+    
     async def is_user_admin(self, chat_id: int, user_id: int) -> bool:
         try:
             chat_member = await self.bot.get_chat_member(chat_id, user_id)
@@ -130,27 +144,6 @@ class SLABot:
         except Exception as e:
             logger.error(f"Ошибка при проверке типа чата: {e}")
             return False
-    
-    def format_task_text(self, task: Dict, template_name: str = 'task_format') -> str:
-        """Форматирует задачу по шаблону из БД"""
-        template = self.templates.get(template_name, '{title} — {assignee}')
-        
-        due_date_str = task['due_date'].strftime('%d.%m.%Y %H:%M') if task.get('due_date') else 'не указан'
-        hours_left = task.get('hours_until_due', 0)
-        time_str = self._format_time(hours_left)
-        
-        return template.format(
-            id=task.get('id', ''),
-            key=task.get('key', ''),
-            title=task.get('title', 'Без названия'),
-            assignee=task.get('assignee', 'Неизвестно'),
-            due_date=due_date_str,
-            remaining=time_str,
-            status=task.get('status', 'Неизвестно'),
-            priority=task.get('priority', 'Не указан'),
-            url=task.get('url', ''),
-            created=task.get('created_formatted', 'неизвестно')
-        )
     
     async def check_tasks(self):
         """Проверяет задачи и отправляет уведомления"""
@@ -175,6 +168,8 @@ class SLABot:
                 if task_status in self.notify_statuses:
                     employee = find_employee_by_name(task['assignee'])
                     if employee:
+                        # Добавляем created_formatted для каждой задачи
+                        task['created_formatted'] = self.format_created_date(task)
                         filtered_tasks.append(task)
                         logger.debug(f"✅ Задача {task['id']} в статусе '{task_status}' — добавлена")
                 else:
@@ -302,16 +297,22 @@ class SLABot:
                 assignee_display = task['assignee']
             
             # Формируем задачу по шаблону
-            task_display = task_format.format(
-                id=task.get('id', ''),
-                title=task.get('title', 'Без названия'),
-                assignee=assignee_display,
-                due_date=task['due_date'].strftime('%d.%m.%Y %H:%M') if task.get('due_date') else 'не указан',
-                remaining=self._format_time(task.get('hours_until_due', 0)),
-                status=task.get('status', 'Неизвестно'),
-                priority=task.get('priority', 'Не указан'),
-                url=task.get('url', '')
-            )
+            try:
+                task_display = task_format.format(
+                    id=task.get('id', ''),
+                    title=task.get('title', 'Без названия'),
+                    assignee=assignee_display,
+                    due_date=task['due_date'].strftime('%d.%m.%Y %H:%M') if task.get('due_date') else 'не указан',
+                    remaining=self._format_time(task.get('hours_until_due', 0)),
+                    status=task.get('status', 'Неизвестно'),
+                    priority=task.get('priority', 'Не указан'),
+                    url=task.get('url', ''),
+                    created=task.get('created_formatted', 'неизвестно')
+                )
+            except KeyError as e:
+                logger.error(f"❌ Ошибка форматирования: отсутствует переменная {e}")
+                # fallback — используем простой формат
+                task_display = f"• {task.get('title', 'Без названия')} — {assignee_display}"
             
             message += task_display + "\n\n"
             
@@ -381,16 +382,9 @@ class SLABot:
                 telegram = employee['telegram_username'] if employee else '—'
                 hours = task['hours_until_due']
                 
-                created_date = "—"
-                if 'created' in task and task['created']:
-                    try:
-                        created_str = task['created']
-                        if 'T' in created_str:
-                            created_str = created_str.split('+')[0].split('.')[0]
-                            created_dt = datetime.strptime(created_str, '%Y-%m-%dT%H:%M:%S')
-                            created_date = created_dt.strftime('%d.%m.%Y')
-                    except:
-                        created_date = "ошибка"
+                created_date = task.get('created_formatted', '—')
+                if created_date == 'неизвестно':
+                    created_date = '—'
                 
                 if hours < 0:
                     sla_status = "ПРОСРОЧЕНО"
@@ -721,6 +715,7 @@ class SLABot:
                             if task_status in self.notify_statuses:
                                 employee = find_employee_by_name(task['assignee'])
                                 if employee:
+                                    task['created_formatted'] = self.format_created_date(task)
                                     filtered_tasks.append(task)
                         
                         tasks_to_notify = [t for t in filtered_tasks if t.get('should_notify', False)]
@@ -763,6 +758,7 @@ class SLABot:
                             if task_status in self.notify_statuses:
                                 employee = find_employee_by_name(task['assignee'])
                                 if employee:
+                                    task['created_formatted'] = self.format_created_date(task)
                                     filtered_tasks.append(task)
                         
                         if not filtered_tasks:
@@ -820,6 +816,7 @@ class SLABot:
                             for task in tasks:
                                 task_copy = task.copy()
                                 task_copy['employee_name'] = emp['full_name']
+                                task_copy['created_formatted'] = self.format_created_date(task_copy)
                                 all_user_tasks.append(task_copy)
                         
                         if not all_user_tasks:
@@ -900,6 +897,9 @@ class SLABot:
                         check_template = self.templates.get('check_task_format', 
                             '📌 Задача: {id}\n📋 Название: {title}\n🔗 Ссылка: {url}\n\n👤 Исполнитель: {assignee}\n📅 Создана: {created}\n⏰ Осталось: {remaining}\n📈 Статус задачи: {status}\n🎯 Приоритет: {priority}')
                         
+                        # Определяем статус SLA для отображения
+                        sla_status_display = self._get_sla_status(task.get('hours_until_due', 0))
+                        
                         task_info = check_template.format(
                             id=task.get('id', ''),
                             title=task.get('title', 'Без названия'),
@@ -908,7 +908,8 @@ class SLABot:
                             created=task.get('created_formatted', 'неизвестно'),
                             remaining=task.get('remaining_text', self._format_time(task.get('hours_until_due', 0))),
                             status=task.get('status', 'Неизвестно'),
-                            priority=task.get('priority', 'Не указан')
+                            priority=task.get('priority', 'Не указан'),
+                            sla_status=sla_status_display
                         )
                         
                         # Добавляем информацию о переоткрытии
