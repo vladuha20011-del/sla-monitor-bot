@@ -1,6 +1,6 @@
 """
 Основной бот для мониторинга SLA с поддержкой команд
-Использует простой polling без Application и без Markdown
+Использует БД для хранения сотрудников и настроек
 """
 
 import asyncio
@@ -10,7 +10,7 @@ import os
 import re
 import io
 from datetime import datetime, timedelta
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 from telegram import Bot, Update, ChatMember, InputFile
 from telegram.constants import ParseMode
@@ -22,7 +22,7 @@ from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 
 import config
 from api_client import TaskAPIClient
-from employees import find_employee_by_name, get_all_telegram_mentions, EMPLOYEES, find_employees_by_lastname
+import db_manager
 
 # Настройка логирования
 logging.basicConfig(
@@ -31,6 +31,58 @@ logging.basicConfig(
     filename=config.LOG_FILE
 )
 logger = logging.getLogger(__name__)
+
+
+# ============ ФУНКЦИИ ДЛЯ РАБОТЫ С БД ============
+
+def get_bot_settings() -> Dict[str, Any]:
+    """Получить настройки бота из БД"""
+    settings = db_manager.get_settings()
+    
+    return {
+        'SLA_HOURS': int(settings.get('SLA_HOURS', 24)),
+        'CHECK_INTERVAL_MINUTES': int(settings.get('CHECK_INTERVAL_MINUTES', 180)),
+        'TAG_START_HOUR': int(settings.get('TAG_START_HOUR', 9)),
+        'TAG_END_HOUR': int(settings.get('TAG_END_HOUR', 18)),
+        'TAG_ENABLED': settings.get('TAG_ENABLED', 'True').lower() == 'true',
+        'TAG_WORKDAYS_ONLY': settings.get('TAG_WORKDAYS_ONLY', 'True').lower() == 'true',
+        'IGNORE_REPLIES': settings.get('IGNORE_REPLIES', 'True').lower() == 'true',
+        'IGNORE_EDITS': settings.get('IGNORE_EDITS', 'True').lower() == 'true',
+        'IGNORE_FORWARDS': settings.get('IGNORE_FORWARDS', 'True').lower() == 'true',
+    }
+
+
+def find_employee_by_name(name_text: str) -> Optional[Dict]:
+    """Найти сотрудника по имени (из БД)"""
+    return db_manager.get_employee_by_name(name_text)
+
+
+def find_employees_by_lastname(lastname: str) -> List[Dict]:
+    """Найти всех сотрудников по фамилии"""
+    employees = db_manager.get_employees(active_only=True)
+    result = []
+    lastname_lower = lastname.lower().strip()
+    
+    for emp in employees:
+        full_name = emp['full_name'].lower()
+        # Проверяем, начинается ли ФИО с фамилии
+        if full_name.startswith(lastname_lower):
+            result.append(emp)
+        else:
+            # Или содержит фамилию как отдельное слово
+            name_parts = full_name.split()
+            if name_parts and name_parts[0] == lastname_lower:
+                result.append(emp)
+    
+    return result
+
+
+def get_all_telegram_mentions() -> str:
+    """Получить все Telegram упоминания из БД"""
+    return db_manager.get_all_telegram_mentions()
+
+
+# ============ ОСНОВНОЙ КЛАСС БОТА ============
 
 class SLABot:
     """Бот для мониторинга SLA задач"""
@@ -42,6 +94,13 @@ class SLABot:
         self.notified_tasks = set()
         self.is_running = True
         self.last_update_id = 0
+        
+        # Инициализируем БД
+        db_manager.init_db()
+        
+        # Загружаем настройки
+        self.settings = get_bot_settings()
+        logger.info(f"✅ Настройки загружены из БД: SLA_HOURS={self.settings['SLA_HOURS']}")
     
     async def is_user_admin(self, chat_id: int, user_id: int) -> bool:
         try:
@@ -67,6 +126,9 @@ class SLABot:
         """Проверяет задачи и отправляет уведомления (текстом или Excel)"""
         if not self.is_running:
             return
+        
+        # Обновляем настройки из БД
+        self.settings = get_bot_settings()
         
         logger.info("🔄 Проверка задач...")
         
@@ -116,15 +178,18 @@ class SLABot:
         if not tasks:
             return
         
+        # Обновляем настройки из БД
+        self.settings = get_bot_settings()
+        
         now = datetime.now()
         current_hour = now.hour
         current_weekday = now.weekday()
         
-        should_mention = config.TAG_ENABLED
+        should_mention = self.settings['TAG_ENABLED']
         if should_mention:
-            time_ok = current_hour >= config.TAG_START_HOUR and current_hour < config.TAG_END_HOUR
+            time_ok = current_hour >= self.settings['TAG_START_HOUR'] and current_hour < self.settings['TAG_END_HOUR']
             day_ok = True
-            if config.TAG_WORKDAYS_ONLY:
+            if self.settings['TAG_WORKDAYS_ONLY']:
                 day_ok = current_weekday < 5
             should_mention = time_ok and day_ok
         
@@ -168,21 +233,24 @@ class SLABot:
         if not tasks:
             return
         
+        # Обновляем настройки из БД
+        self.settings = get_bot_settings()
+        
         now = datetime.now()
         current_hour = now.hour
         current_weekday = now.weekday()
         
-        should_mention = config.TAG_ENABLED
+        should_mention = self.settings['TAG_ENABLED']
         
         if should_mention:
-            time_ok = current_hour >= config.TAG_START_HOUR and current_hour < config.TAG_END_HOUR
+            time_ok = current_hour >= self.settings['TAG_START_HOUR'] and current_hour < self.settings['TAG_END_HOUR']
             day_ok = True
-            if config.TAG_WORKDAYS_ONLY:
+            if self.settings['TAG_WORKDAYS_ONLY']:
                 day_ok = current_weekday < 5
             should_mention = time_ok and day_ok
             
             if not time_ok:
-                logger.info(f"⏰ Теги отключены по времени: {current_hour}ч (рабочие часы {config.TAG_START_HOUR}-{config.TAG_END_HOUR})")
+                logger.info(f"⏰ Теги отключены по времени: {current_hour}ч (рабочие часы {self.settings['TAG_START_HOUR']}-{self.settings['TAG_END_HOUR']})")
             elif not day_ok:
                 logger.info(f"📅 Теги отключены по дню недели: {current_weekday} (рабочие дни пн-пт)")
         
@@ -857,7 +925,6 @@ class SLABot:
                             if task.get('was_reopened') and not task.get('remaining_text'):
                                 task_info += f"⏰ Дедлайн: {task['due_date'].strftime('%d.%m.%Y %H:%M')}\n"
                                 task_info += f"⌛ Осталось: 0ч (SLA не перезапущен)\n"
-                                # ДОБАВЛЯЕМ СТРОКУ ТОЛЬКО ЗДЕСЬ, ОДИН РАЗ
                                 task_info += f"ℹ️ Задача была переоткрыта! SLA не был перезапущен\n"
                             else:
                                 task_info += f"⏰ Дедлайн: {task['due_date'].strftime('%d.%m.%Y %H:%M')}\n"
@@ -865,13 +932,10 @@ class SLABot:
                         else:
                             task_info += f"⏰ Дедлайн: не указан\n"
                         
-                        # НЕ ДОБАВЛЯЕМ НИЧЕГО ДОПОЛНИТЕЛЬНО!
-                        
                         task_info += (
                             f"📈 Статус задачи: {task['status']}\n"
                             f"🎯 Приоритет: {task['priority'] or 'Не указан'}"
                         )
-                        
                         
                         await self.bot.send_message(
                             chat_id=chat_id,
@@ -938,13 +1002,20 @@ class SLABot:
     
     async def run_forever(self):
         """Запускает бесконечный цикл"""
-        logger.info(f"🚀 Бот запущен. Интервал проверки: {config.CHECK_INTERVAL_MINUTES} минут")
+        # Загружаем настройки из БД
+        self.settings = get_bot_settings()
+        check_interval = self.settings['CHECK_INTERVAL_MINUTES']
+        
+        logger.info(f"🚀 Бот запущен. Интервал проверки: {check_interval} минут")
+        logger.info(f"📋 SLA_HOURS: {self.settings['SLA_HOURS']} часов")
+        logger.info(f"🔔 Теги включены: {self.settings['TAG_ENABLED']}")
+        
         self.last_update_id = 0
         
         while self.is_running:
             try:
                 current_minute = datetime.now().minute
-                if current_minute % config.CHECK_INTERVAL_MINUTES == 0:
+                if current_minute % check_interval == 0:
                     await self.check_tasks()
                     await asyncio.sleep(60)
                 
@@ -965,14 +1036,20 @@ async def test_bot():
     print("🤖 ТЕСТИРОВАНИЕ SLA БОТА")
     print("=" * 60)
     
-    print("\n📋 Проверка конфигурации:")
-    print(f"   CHAT_ID: {config.CHAT_ID}")
-    print(f"   BOT_TOKEN: {config.BOT_TOKEN[:10]}...")
-    print(f"   SLA_HOURS: {config.SLA_HOURS}")
+    # Инициализируем БД
+    db_manager.init_db()
     
-    bot = SLABot()
+    settings = get_bot_settings()
+    print("\n📋 Настройки из БД:")
+    print(f"   SLA_HOURS: {settings['SLA_HOURS']}")
+    print(f"   CHECK_INTERVAL_MINUTES: {settings['CHECK_INTERVAL_MINUTES']}")
+    print(f"   TAG_ENABLED: {settings['TAG_ENABLED']}")
+    
+    employees = db_manager.get_employees(active_only=True)
+    print(f"\n👥 Сотрудников в БД: {len(employees)}")
     
     print("\n🔍 Получаем задачи из Jira...")
+    bot = SLABot()
     tasks = await bot.api_client.get_tasks()
     
     if tasks:
@@ -1001,7 +1078,7 @@ async def send_test_notification():
     
     employee = find_employee_by_name("Бухвиц Владислав")
     if not employee:
-        print("❌ Сотрудник не найден")
+        print("❌ Сотрудник не найден в БД")
         return
     
     test_task = {
@@ -1021,6 +1098,9 @@ async def send_test_notification():
 
 
 if __name__ == "__main__":
+    # Инициализируем БД при запуске
+    db_manager.init_db()
+    
     if len(sys.argv) > 1:
         if sys.argv[1] == "--test":
             asyncio.run(test_bot())
