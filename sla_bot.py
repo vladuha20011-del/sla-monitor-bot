@@ -1,6 +1,6 @@
 """
 Основной бот для мониторинга SLA с поддержкой команд
-Использует БД для хранения сотрудников и настроек
+Использует БД для хранения сотрудников, настроек, статусов и шаблонов
 """
 
 import asyncio
@@ -13,12 +13,11 @@ from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List
 
 from telegram import Bot, Update, ChatMember, InputFile
-from telegram.constants import ParseMode
 from telegram.error import TelegramError
 
 # Для Excel отчётов
 from openpyxl import Workbook
-from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+from openpyxl.styles import Font, Alignment, PatternFill
 
 import config
 from api_client import TaskAPIClient
@@ -28,7 +27,8 @@ import db_manager
 logging.basicConfig(
     level=getattr(logging, config.LOG_LEVEL),
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    filename=config.LOG_FILE
+    filename=config.LOG_FILE,
+    encoding='utf-8'
 )
 logger = logging.getLogger(__name__)
 
@@ -52,6 +52,17 @@ def get_bot_settings() -> Dict[str, Any]:
     }
 
 
+def get_message_templates() -> Dict[str, str]:
+    """Получить шаблоны сообщений из БД"""
+    templates = db_manager.get_all_templates()
+    
+    return {
+        'header': templates.get('header', '⚠️ Внимание! Приближается SLA!'),
+        'footer': templates.get('footer', 'Коллеги, обратите внимание!'),
+        'task_format': templates.get('task_format', '• {title} — исполнитель: {assignee}, дедлайн: {due_date} (осталось {remaining})'),
+    }
+
+
 def find_employee_by_name(name_text: str) -> Optional[Dict]:
     """Найти сотрудника по имени (из БД)"""
     return db_manager.get_employee_by_name(name_text)
@@ -65,11 +76,9 @@ def find_employees_by_lastname(lastname: str) -> List[Dict]:
     
     for emp in employees:
         full_name = emp['full_name'].lower()
-        # Проверяем, начинается ли ФИО с фамилии
         if full_name.startswith(lastname_lower):
             result.append(emp)
         else:
-            # Или содержит фамилию как отдельное слово
             name_parts = full_name.split()
             if name_parts and name_parts[0] == lastname_lower:
                 result.append(emp)
@@ -77,9 +86,9 @@ def find_employees_by_lastname(lastname: str) -> List[Dict]:
     return result
 
 
-def get_all_telegram_mentions() -> str:
-    """Получить все Telegram упоминания из БД"""
-    return db_manager.get_all_telegram_mentions()
+def get_allowed_statuses() -> List[str]:
+    """Получить список разрешённых статусов из БД"""
+    return db_manager.get_task_statuses(active_only=True)
 
 
 # ============ ОСНОВНОЙ КЛАСС БОТА ============
@@ -100,7 +109,18 @@ class SLABot:
         
         # Загружаем настройки
         self.settings = get_bot_settings()
+        self.templates = get_message_templates()
+        self.allowed_statuses = get_allowed_statuses()
+        
         logger.info(f"✅ Настройки загружены из БД: SLA_HOURS={self.settings['SLA_HOURS']}")
+        logger.info(f"📋 Разрешённые статусы: {self.allowed_statuses}")
+    
+    def reload_settings(self):
+        """Перезагрузить настройки из БД"""
+        self.settings = get_bot_settings()
+        self.templates = get_message_templates()
+        self.allowed_statuses = get_allowed_statuses()
+        logger.info("🔄 Настройки перезагружены из БД")
     
     async def is_user_admin(self, chat_id: int, user_id: int) -> bool:
         try:
@@ -123,12 +143,12 @@ class SLABot:
             return False
     
     async def check_tasks(self):
-        """Проверяет задачи и отправляет уведомления (текстом или Excel)"""
+        """Проверяет задачи и отправляет уведомления"""
         if not self.is_running:
             return
         
-        # Обновляем настройки из БД
-        self.settings = get_bot_settings()
+        # Перезагружаем настройки из БД
+        self.reload_settings()
         
         logger.info("🔄 Проверка задач...")
         
@@ -139,15 +159,21 @@ class SLABot:
                 logger.info("✅ Нет задач")
                 return
             
-            employee_tasks = []
+            # Фильтруем задачи по статусам
+            filtered_tasks = []
             for task in tasks:
-                employee = find_employee_by_name(task['assignee'])
-                if employee:
-                    employee_tasks.append(task)
+                task_status = task.get('status', '')
+                if task_status in self.allowed_statuses:
+                    employee = find_employee_by_name(task['assignee'])
+                    if employee:
+                        filtered_tasks.append(task)
+                        logger.debug(f"✅ Задача {task['id']} в статусе '{task_status}' — добавлена")
+                else:
+                    logger.debug(f"⏭️ Задача {task['id']} в статусе '{task_status}' — пропущена")
             
-            logger.info(f"📊 Задач от сотрудников отдела: {len(employee_tasks)}")
+            logger.info(f"📊 Задач от сотрудников отдела в нужных статусах: {len(filtered_tasks)}")
             
-            tasks_to_notify = [t for t in employee_tasks if t.get('should_notify', False)]
+            tasks_to_notify = [t for t in filtered_tasks if t.get('should_notify', False)]
             
             logger.info(f"📊 Задач для уведомления: {len(tasks_to_notify)}")
             
@@ -170,6 +196,8 @@ class SLABot:
                 logger.info(f"📊 Отправляем текстовое уведомление ({len(new_tasks)} задач)")
                 await self._send_bulk_notification(new_tasks, is_manual=False)
             
+            db_manager.increment_stats('checks')
+            
         except Exception as e:
             logger.error(f"❌ Ошибка при проверке задач: {e}", exc_info=True)
     
@@ -178,8 +206,7 @@ class SLABot:
         if not tasks:
             return
         
-        # Обновляем настройки из БД
-        self.settings = get_bot_settings()
+        self.reload_settings()
         
         now = datetime.now()
         current_hour = now.hour
@@ -233,8 +260,7 @@ class SLABot:
         if not tasks:
             return
         
-        # Обновляем настройки из БД
-        self.settings = get_bot_settings()
+        self.reload_settings()
         
         now = datetime.now()
         current_hour = now.hour
@@ -248,13 +274,13 @@ class SLABot:
             if self.settings['TAG_WORKDAYS_ONLY']:
                 day_ok = current_weekday < 5
             should_mention = time_ok and day_ok
-            
-            if not time_ok:
-                logger.info(f"⏰ Теги отключены по времени: {current_hour}ч (рабочие часы {self.settings['TAG_START_HOUR']}-{self.settings['TAG_END_HOUR']})")
-            elif not day_ok:
-                logger.info(f"📅 Теги отключены по дню недели: {current_weekday} (рабочие дни пн-пт)")
         
-        message = "⚠️ Внимание! Приближается SLA!\n\n"
+        # Используем шаблоны из БД
+        header = self.templates.get('header', '⚠️ Внимание! Приближается SLA!')
+        footer = self.templates.get('footer', 'Коллеги, обратите внимание!')
+        task_format = self.templates.get('task_format', '• {title} — исполнитель: {assignee}, дедлайн: {due_date} (осталось {remaining})')
+        
+        message = f"{header}\n\n"
         messages_sent = 0
         
         for i, task in enumerate(tasks):
@@ -273,7 +299,6 @@ class SLABot:
             except Exception as e:
                 logger.debug(f"Ошибка получения истории для {task['id']}: {e}")
             
-            # Формируем время и статус
             hours_left = task['hours_until_due']
             time_str = self._format_time(hours_left)
             sla_status = self._get_sla_status(hours_left)
@@ -289,52 +314,19 @@ class SLABot:
                 except:
                     created_date = str(task['created'])[:16]
             
-            # Добавляем задачу в общее сообщение
-            message += (
-                f"📌 Задача: {task['id']}\n"
-                f"🔗 Ссылка: {task['url']}\n"
-                f"📋 Название: {task['title']}\n"
-                f"👤 Исполнитель: {mention}\n"
-                f"📅 Создана: {created_date}\n"
+            # Формируем задачу по шаблону из БД
+            task_text = task_format.format(
+                id=task['id'],
+                title=task['title'],
+                assignee=mention,
+                due_date=task['due_date'].strftime('%d.%m.%Y %H:%M') if task.get('due_date') else 'не указан',
+                remaining=time_str,
+                status=task['status'],
+                priority=task['priority'] or 'Не указан',
+                url=task['url']
             )
             
-            # Добавляем информацию о переоткрытии, если есть
-            if was_reopened and reopen_date:
-                try:
-                    reopen_dt = datetime.fromisoformat(reopen_date.replace('Z', '+00:00'))
-                    reopen_str = reopen_dt.strftime('%d.%m.%Y %H:%M')
-                    message += f"🔄 Переоткрыта: {reopen_str}\n"
-                except Exception as e:
-                    logger.debug(f"Ошибка парсинга даты переоткрытия: {e}")
-            
-            # Добавляем оставшееся время
-            if task.get('remaining_text'):
-                message += f"⏰ Осталось на решение: {task['remaining_text']}\n"
-            elif task.get('due_date'):
-                # Проверяем, переоткрыта ли задача без активного SLA
-                if was_reopened and not task.get('remaining_text'):
-                    message += f"⏰ Дедлайн: {task['due_date'].strftime('%d.%m.%Y %H:%M')}\n"
-                    message += f"⌛ Осталось: 0ч (SLA не перезапущен)\n"
-                else:
-                    message += f"⏰ Дедлайн: {task['due_date'].strftime('%d.%m.%Y %H:%M')}\n"
-                    message += f"⌛ Осталось: {time_str}\n"
-            else:
-                message += f"⏰ Дедлайн: не указан\n"
-            
-            message += (
-                f"📊 {sla_status}\n"
-                f"📈 Статус: {task['status']}\n"
-                f"🎯 Приоритет: {task['priority'] or 'Не указан'}\n"
-            )
-            
-            # Добавляем примечание о переоткрытии (только одна строка!)
-            if was_reopened:
-                if not task.get('remaining_text') and task.get('due_date'):
-                    message += f"ℹ️ Задача была переоткрыта! SLA не был перезапущен\n"
-                else:
-                    message += f"ℹ️ Задача была переоткрыта!\n"
-            
-            message += "\n"
+            message += task_text + "\n\n"
             
             if i < len(tasks) - 1:
                 message += f"{'—' * 45}\n\n"
@@ -343,21 +335,19 @@ class SLABot:
                 self.notified_tasks.add(task['id'])
             
             if len(message) > 3500:
-                if not message.endswith("Коллеги, обратите внимание на задачи!"):
-                    message += "Коллеги, обратите внимание на задачи!"
-                
+                message += f"\n{footer}"
                 await self.bot.send_message(
                     chat_id=self.chat_id,
                     text=message,
                     disable_web_page_preview=True
                 )
                 messages_sent += 1
-                logger.info(f"📨 Отправлена часть {messages_sent} (примерно {i+1}/{len(tasks)} задач)")
+                logger.info(f"📨 Отправлена часть {messages_sent}")
                 await asyncio.sleep(2)
-                message = "⚠️ Внимание! Приближается SLA! (продолжение)\n\n"
+                message = f"{header} (продолжение)\n\n"
         
-        if message and not message.endswith("Коллеги, обратите внимание на задачи!"):
-            message += "Коллеги, обратите внимание на задачи!"
+        if message and not message.endswith(footer):
+            message += f"\n{footer}"
         
         if message and len(message) > 0:
             try:
@@ -367,7 +357,7 @@ class SLABot:
                     disable_web_page_preview=True
                 )
                 messages_sent += 1
-                logger.info(f"✅ Отправлено общее уведомление с {len(tasks)} задачами (всего {messages_sent} частей)")
+                logger.info(f"✅ Отправлено общее уведомление с {len(tasks)} задачами")
             except TelegramError as e:
                 logger.error(f"❌ Ошибка отправки общего уведомления: {e}")
     
@@ -429,7 +419,7 @@ class SLABot:
                 ws.cell(row=row, column=3, value=task['assignee'])
                 ws.cell(row=row, column=4, value=telegram)
                 ws.cell(row=row, column=5, value=created_date)
-                ws.cell(row=row, column=6, value=task['due_date'].strftime('%d.%m.%Y'))
+                ws.cell(row=row, column=6, value=task['due_date'].strftime('%d.%m.%Y') if task.get('due_date') else '—')
                 ws.cell(row=row, column=7, value=round(hours, 1))
                 ws.cell(row=row, column=8, value=sla_status)
                 ws.cell(row=row, column=9, value=task['status'][:15])
@@ -480,14 +470,8 @@ class SLABot:
             ws.title = "Задачи"
             
             headers = [
-                'ID задачи',
-                'Тип задачи',
-                'Название',
-                'Статус',
-                'Создана',
-                'Дедлайн',
-                'Исполнитель',
-                'Ссылка'
+                'ID задачи', 'Тип задачи', 'Название', 'Статус',
+                'Создана', 'Дедлайн', 'Исполнитель', 'Ссылка'
             ]
             
             header_font = Font(bold=True, color="FFFFFF")
@@ -604,7 +588,6 @@ class SLABot:
             assignee_data = fields.get('assignee')
             assignee_name = self.api_client._extract_assignee(assignee_data)
             
-            # Пытаемся получить дату SLA, если нет — используем None
             due_date, sla_source, remaining_text = self.api_client._extract_sla_date(fields)
             
             now = datetime.now()
@@ -613,10 +596,8 @@ class SLABot:
                     due_date = due_date.replace(tzinfo=None)
                 hours_until_due = (due_date - now).total_seconds() / 3600
             else:
-                # Если нет даты SLA, ставим большое число (не уведомляем)
                 hours_until_due = 9999
             
-            # Проверяем, была ли задача переоткрыта
             was_reopened = False
             reopen_date = None
             try:
@@ -723,15 +704,18 @@ class SLABot:
                             text="🔍 Формирую отчёт по новым задачам с истекающим SLA..."
                         )
                         
+                        self.reload_settings()
                         tasks = await self.api_client.get_tasks()
                         
-                        employee_tasks = []
+                        filtered_tasks = []
                         for task in tasks:
-                            employee = find_employee_by_name(task['assignee'])
-                            if employee:
-                                employee_tasks.append(task)
+                            task_status = task.get('status', '')
+                            if task_status in self.allowed_statuses:
+                                employee = find_employee_by_name(task['assignee'])
+                                if employee:
+                                    filtered_tasks.append(task)
                         
-                        tasks_to_notify = [t for t in employee_tasks if t.get('should_notify', False)]
+                        tasks_to_notify = [t for t in filtered_tasks if t.get('should_notify', False)]
                         
                         if not tasks_to_notify:
                             await self.bot.send_message(
@@ -762,32 +746,35 @@ class SLABot:
                             text="📊 Формирую Excel отчёт по задачам отдела..."
                         )
                         
+                        self.reload_settings()
                         tasks = await self.api_client.get_tasks()
                         
-                        dep_tasks = []
+                        filtered_tasks = []
                         for task in tasks:
-                            employee = find_employee_by_name(task['assignee'])
-                            if employee:
-                                dep_tasks.append(task)
+                            task_status = task.get('status', '')
+                            if task_status in self.allowed_statuses:
+                                employee = find_employee_by_name(task['assignee'])
+                                if employee:
+                                    filtered_tasks.append(task)
                         
-                        if not dep_tasks:
+                        if not filtered_tasks:
                             await self.bot.send_message(
                                 chat_id=chat_id,
-                                text="✅ Нет задач у сотрудников отдела"
+                                text="✅ Нет задач у сотрудников отдела в нужных статусах"
                             )
                             continue
                         
-                        dep_tasks.sort(key=lambda x: x['hours_until_due'])
+                        filtered_tasks.sort(key=lambda x: x['hours_until_due'])
                         
-                        excel_file = await self._generate_excel_report(dep_tasks)
+                        excel_file = await self._generate_excel_report(filtered_tasks)
                         
                         await self.bot.send_document(
                             chat_id=chat_id,
                             document=InputFile(excel_file, filename=excel_file.name),
-                            caption=f"📊 Отчёт по задачам отдела (всего: {len(dep_tasks)})"
+                            caption=f"📊 Отчёт по задачам отдела (всего: {len(filtered_tasks)})"
                         )
                         
-                        logger.info(f"✅ Отправлен Excel отчёт с {len(dep_tasks)} задачами")
+                        logger.info(f"✅ Отправлен Excel отчёт с {len(filtered_tasks)} задачами")
                     
                     elif base_command == '/request':
                         if len(parts) < 2:
@@ -909,7 +896,6 @@ class SLABot:
                             f"📅 Создана: {created_date}\n"
                         )
                         
-                        # Добавляем информацию о переоткрытии
                         if task.get('was_reopened') and task.get('reopen_date'):
                             try:
                                 reopen_dt = datetime.fromisoformat(task['reopen_date'].replace('Z', '+00:00'))
@@ -918,7 +904,6 @@ class SLABot:
                             except:
                                 pass
                         
-                        # Добавляем информацию о дедлайне
                         if task.get('remaining_text'):
                             task_info += f"⏰ Осталось на решение: {task['remaining_text']}\n"
                         elif task.get('due_date'):
@@ -1002,13 +987,13 @@ class SLABot:
     
     async def run_forever(self):
         """Запускает бесконечный цикл"""
-        # Загружаем настройки из БД
-        self.settings = get_bot_settings()
+        self.reload_settings()
         check_interval = self.settings['CHECK_INTERVAL_MINUTES']
         
         logger.info(f"🚀 Бот запущен. Интервал проверки: {check_interval} минут")
         logger.info(f"📋 SLA_HOURS: {self.settings['SLA_HOURS']} часов")
         logger.info(f"🔔 Теги включены: {self.settings['TAG_ENABLED']}")
+        logger.info(f"📋 Разрешённые статусы: {self.allowed_statuses}")
         
         self.last_update_id = 0
         
@@ -1036,14 +1021,22 @@ async def test_bot():
     print("🤖 ТЕСТИРОВАНИЕ SLA БОТА")
     print("=" * 60)
     
-    # Инициализируем БД
     db_manager.init_db()
     
     settings = get_bot_settings()
+    templates = get_message_templates()
+    allowed_statuses = get_allowed_statuses()
+    
     print("\n📋 Настройки из БД:")
     print(f"   SLA_HOURS: {settings['SLA_HOURS']}")
     print(f"   CHECK_INTERVAL_MINUTES: {settings['CHECK_INTERVAL_MINUTES']}")
     print(f"   TAG_ENABLED: {settings['TAG_ENABLED']}")
+    
+    print(f"\n📋 Разрешённые статусы: {allowed_statuses}")
+    
+    print(f"\n📝 Шаблоны:")
+    print(f"   Заголовок: {templates['header']}")
+    print(f"   Формат задачи: {templates['task_format'][:50]}...")
     
     employees = db_manager.get_employees(active_only=True)
     print(f"\n👥 Сотрудников в БД: {len(employees)}")
@@ -1054,16 +1047,25 @@ async def test_bot():
     
     if tasks:
         print(f"\n✅ Получено задач: {len(tasks)}")
-        to_notify = [t for t in tasks if t.get('should_notify')]
+        
+        # Проверяем фильтрацию по статусам
+        filtered = []
+        for task in tasks:
+            if task.get('status', '') in allowed_statuses:
+                filtered.append(task)
+        
+        print(f"📊 После фильтрации по статусам: {len(filtered)}")
+        
+        to_notify = [t for t in filtered if t.get('should_notify')]
         print(f"⚠️ Требуют уведомления: {len(to_notify)}")
         
         if tasks:
             print(f"\n📋 Пример задачи:")
             task = tasks[0]
             print(f"   ID: {task['id']}")
+            print(f"   Статус: {task['status']}")
             print(f"   Исполнитель: {task['assignee']}")
-            print(f"   Дедлайн: {task['due_date'].strftime('%d.%m.%Y %H:%M')}")
-            print(f"   Осталось: {task['hours_until_due']:.1f}ч")
+            print(f"   Дедлайн: {task['due_date'].strftime('%d.%m.%Y %H:%M') if task.get('due_date') else 'Нет'}")
     else:
         print("\n❌ Не удалось получить задачи")
     
@@ -1087,7 +1089,7 @@ async def send_test_notification():
         "assignee": "Бухвиц Владислав",
         "due_date": datetime.now() + timedelta(hours=2),
         "hours_until_due": 2.5,
-        "status": "В работе",
+        "status": "В процессе",
         "priority": "High",
         "url": "https://test.ru",
         "created": datetime.now().isoformat()
@@ -1098,7 +1100,6 @@ async def send_test_notification():
 
 
 if __name__ == "__main__":
-    # Инициализируем БД при запуске
     db_manager.init_db()
     
     if len(sys.argv) > 1:
