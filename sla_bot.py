@@ -125,6 +125,17 @@ class SLABot:
                 created_date = str(task['created'])[:16]
         return created_date
     
+    def format_reopen_date(self, task: Dict) -> str:
+        """Форматирует дату переоткрытия задачи"""
+        reopen_date_str = ""
+        if task.get('was_reopened') and task.get('reopen_date'):
+            try:
+                reopen_dt = datetime.fromisoformat(task['reopen_date'].replace('Z', '+00:00'))
+                reopen_date_str = reopen_dt.strftime('%d.%m.%Y %H:%M')
+            except:
+                reopen_date_str = str(task['reopen_date'])[:16]
+        return reopen_date_str
+    
     async def is_user_admin(self, chat_id: int, user_id: int) -> bool:
         try:
             chat_member = await self.bot.get_chat_member(chat_id, user_id)
@@ -170,6 +181,7 @@ class SLABot:
                     if employee:
                         # Добавляем created_formatted для каждой задачи
                         task['created_formatted'] = self.format_created_date(task)
+                        task['reopen_formatted'] = self.format_reopen_date(task)
                         filtered_tasks.append(task)
                         logger.debug(f"✅ Задача {task['id']} в статусе '{task_status}' — добавлена")
                 else:
@@ -300,6 +312,11 @@ class SLABot:
             hours = task.get('hours_until_due', 0)
             sla_status_display = self._get_sla_status(hours)
             
+            # Информация о переоткрытии
+            reopen_info = ""
+            if task.get('was_reopened') and task.get('reopen_formatted'):
+                reopen_info = f"\n🔄 Переоткрыта: {task.get('reopen_formatted')}"
+            
             # Формируем задачу по шаблону
             try:
                 task_display = task_format.format(
@@ -318,6 +335,10 @@ class SLABot:
                 logger.error(f"❌ Ошибка форматирования: отсутствует переменная {e}")
                 # fallback — используем простой формат
                 task_display = f"• {task.get('title', 'Без названия')} — {assignee_display}"
+            
+            # Добавляем информацию о переоткрытии
+            if reopen_info:
+                task_display += reopen_info
             
             message += task_display + "\n\n"
             
@@ -606,6 +627,14 @@ class SLABot:
                 except:
                     created_date = str(fields.get('created'))[:16]
             
+            reopen_formatted = ""
+            if was_reopened and reopen_date:
+                try:
+                    reopen_dt = datetime.fromisoformat(reopen_date.replace('Z', '+00:00'))
+                    reopen_formatted = reopen_dt.strftime('%d.%m.%Y %H:%M')
+                except:
+                    reopen_formatted = str(reopen_date)[:16]
+            
             task = {
                 "id": task_data.get('key'),
                 "key": task_data.get('key'),
@@ -623,9 +652,10 @@ class SLABot:
                 "due_date_source": sla_source,
                 "created": fields.get('created'),
                 "created_formatted": created_date,
-                "raw_data": task_data,
                 "was_reopened": was_reopened,
-                "reopen_date": reopen_date
+                "reopen_date": reopen_date,
+                "reopen_formatted": reopen_formatted,
+                "raw_data": task_data
             }
             return task
             
@@ -721,6 +751,7 @@ class SLABot:
                                 employee = find_employee_by_name(task['assignee'])
                                 if employee:
                                     task['created_formatted'] = self.format_created_date(task)
+                                    task['reopen_formatted'] = self.format_reopen_date(task)
                                     filtered_tasks.append(task)
                         
                         tasks_to_notify = [t for t in filtered_tasks if t.get('should_notify', False)]
@@ -764,6 +795,7 @@ class SLABot:
                                 employee = find_employee_by_name(task['assignee'])
                                 if employee:
                                     task['created_formatted'] = self.format_created_date(task)
+                                    task['reopen_formatted'] = self.format_reopen_date(task)
                                     filtered_tasks.append(task)
                         
                         if not filtered_tasks:
@@ -822,6 +854,7 @@ class SLABot:
                                 task_copy = task.copy()
                                 task_copy['employee_name'] = emp['full_name']
                                 task_copy['created_formatted'] = self.format_created_date(task_copy)
+                                task_copy['reopen_formatted'] = self.format_reopen_date(task_copy)
                                 all_user_tasks.append(task_copy)
                         
                         if not all_user_tasks:
@@ -918,13 +951,8 @@ class SLABot:
                         )
                         
                         # Добавляем информацию о переоткрытии
-                        if task.get('was_reopened') and task.get('reopen_date'):
-                            try:
-                                reopen_dt = datetime.fromisoformat(task['reopen_date'].replace('Z', '+00:00'))
-                                reopen_str = reopen_dt.strftime('%d.%m.%Y %H:%M')
-                                task_info += f"\n🔄 Переоткрыта: {reopen_str}"
-                            except:
-                                pass
+                        if task.get('was_reopened') and task.get('reopen_formatted'):
+                            task_info += f"\n🔄 Переоткрыта: {task.get('reopen_formatted')}"
                         
                         await self.bot.send_message(
                             chat_id=chat_id,
@@ -1096,7 +1124,9 @@ async def send_test_notification():
         "priority": "High",
         "url": "https://test.ru",
         "created": datetime.now().isoformat(),
-        "created_formatted": datetime.now().strftime('%d.%m.%Y %H:%M')
+        "created_formatted": datetime.now().strftime('%d.%m.%Y %H:%M'),
+        "was_reopened": True,
+        "reopen_formatted": (datetime.now() - timedelta(days=1)).strftime('%d.%m.%Y %H:%M')
     }
     
     await bot._send_bulk_notification([test_task])
