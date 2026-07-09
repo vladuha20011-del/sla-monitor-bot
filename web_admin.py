@@ -30,7 +30,8 @@ try:
                 'search_names': emp['search_names'],
                 'telegram_username': emp['telegram_username'],
                 'email': emp['email'],
-                'username': emp.get('username', emp['email'].split('@')[0])
+                'username': emp.get('username', emp['email'].split('@')[0]),
+                'status': 'active'
             })
         print("✅ Сотрудники перенесены из employees.py")
 except ImportError:
@@ -53,6 +54,13 @@ def api_get_employees():
     employees = db_manager.get_employees(active_only=True)
     return jsonify(employees)
 
+@app.route('/api/employees/<int:employee_id>')
+def api_get_employee(employee_id):
+    employee = db_manager.get_employee_by_id(employee_id)
+    if employee:
+        return jsonify(employee)
+    return jsonify({'error': 'Сотрудник не найден'}), 404
+
 @app.route('/api/employees', methods=['POST'])
 def api_add_employee():
     data = request.json
@@ -64,12 +72,23 @@ def api_add_employee():
         name_parts = data['full_name'].split()
         data['search_names'] = [name_parts[0], name_parts[1]] if len(name_parts) >= 2 else [name_parts[0]]
     
+    if 'status' not in data:
+        data['status'] = 'active'
+    
     db_manager.add_employee(data)
     return jsonify({'status': 'ok', 'message': 'Сотрудник добавлен'})
 
 @app.route('/api/employees/<int:employee_id>', methods=['PUT'])
 def api_update_employee(employee_id):
     data = request.json
+    
+    if 'search_names' not in data or not data['search_names']:
+        name_parts = data['full_name'].split()
+        data['search_names'] = [name_parts[0], name_parts[1]] if len(name_parts) >= 2 else [name_parts[0]]
+    
+    if 'status' not in data:
+        data['status'] = 'active'
+    
     db_manager.update_employee(employee_id, data)
     return jsonify({'status': 'ok', 'message': 'Сотрудник обновлён'})
 
