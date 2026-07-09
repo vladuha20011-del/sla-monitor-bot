@@ -19,7 +19,7 @@ def init_db():
     conn = get_db_connection()
     c = conn.cursor()
     
-    # Таблица сотрудников
+    # Таблица сотрудников (с полем status)
     c.execute('''
         CREATE TABLE IF NOT EXISTS employees (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -28,9 +28,16 @@ def init_db():
             telegram_username TEXT,
             email TEXT,
             username TEXT,
+            status TEXT DEFAULT 'active',
             is_active INTEGER DEFAULT 1
         )
     ''')
+    
+    # Добавляем колонку status, если её нет (для старых БД)
+    try:
+        c.execute('ALTER TABLE employees ADD COLUMN status TEXT DEFAULT "active"')
+    except sqlite3.OperationalError:
+        pass  # колонка уже существует
     
     # Таблица настроек
     c.execute('''
@@ -111,12 +118,13 @@ def init_db():
         c.execute('INSERT OR IGNORE INTO task_statuses (name, notify_enabled) VALUES (?, ?)', 
                   (status, notify))
     
-    # Добавляем шаблоны по умолчанию (из текущего кода)
+    # Добавляем шаблоны по умолчанию
     default_templates = [
         ('header', '⚠️ Внимание! Приближается SLA!', 'Заголовок уведомления'),
         ('footer', 'Коллеги, обратите внимание!', 'Финальная фраза'),
-        ('task_format', '• {title} — исполнитель: {assignee}, дедлайн: {due_date} (осталось {remaining})', 'Формат задачи в рассылке'),
+        ('task_format', '📌 Задача: {id}\n🔗 Ссылка: {url}\n📋 Название: {title}\n👤 Исполнитель: {assignee}\n📅 Создана: {created}\n⏰ Осталось на решение: {remaining}\n📈 Статус: {status}\n🎯 Приоритет: {priority}', 'Формат задачи в рассылке'),
         ('check_task_format', '📌 Задача: {id}\n📋 Название: {title}\n🔗 Ссылка: {url}\n\n👤 Исполнитель: {assignee}\n📅 Создана: {created}\n⏰ Осталось: {remaining}\n📈 Статус задачи: {status}\n🎯 Приоритет: {priority}', 'Формат задачи в /check'),
+        ('reopen_format', '🔄 Переоткрыта: {reopen_date}', 'Текст для переоткрытой задачи'),
         ('alarm_header', '⚠️ Внимание! Приближается SLA!', 'Заголовок для /alarm'),
         ('alarm_footer', 'Коллеги, обратите внимание!', 'Финальная фраза для /alarm'),
         ('request_caption', '📊 ВСЕ задачи сотрудников: {employees}\n📈 Всего задач: {total}\n📋 {status_summary}', 'Подпись для /request'),
@@ -142,6 +150,8 @@ def get_employees(active_only: bool = True) -> List[Dict]:
     if active_only:
         query += ' WHERE is_active = 1'
     
+    query += ' ORDER BY id'
+    
     c.execute(query)
     rows = c.fetchall()
     conn.close()
@@ -155,6 +165,7 @@ def get_employees(active_only: bool = True) -> List[Dict]:
             'telegram_username': row['telegram_username'],
             'email': row['email'],
             'username': row['username'],
+            'status': row['status'] if 'status' in row.keys() else 'active',
             'is_active': row['is_active']
         })
     return employees
@@ -164,15 +175,18 @@ def add_employee(data: Dict) -> int:
     conn = get_db_connection()
     c = conn.cursor()
     
+    status = data.get('status', 'active')
+    
     c.execute('''
-        INSERT INTO employees (full_name, search_names, telegram_username, email, username)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO employees (full_name, search_names, telegram_username, email, username, status)
+        VALUES (?, ?, ?, ?, ?, ?)
     ''', (
         data['full_name'],
         ','.join(data['search_names']),
         data['telegram_username'],
         data['email'],
-        data['username']
+        data['username'],
+        status
     ))
     
     conn.commit()
@@ -185,9 +199,11 @@ def update_employee(employee_id: int, data: Dict):
     conn = get_db_connection()
     c = conn.cursor()
     
+    status = data.get('status', 'active')
+    
     c.execute('''
         UPDATE employees 
-        SET full_name = ?, search_names = ?, telegram_username = ?, email = ?, username = ?
+        SET full_name = ?, search_names = ?, telegram_username = ?, email = ?, username = ?, status = ?
         WHERE id = ?
     ''', (
         data['full_name'],
@@ -195,6 +211,7 @@ def update_employee(employee_id: int, data: Dict):
         data['telegram_username'],
         data['email'],
         data['username'],
+        status,
         employee_id
     ))
     
@@ -215,7 +232,7 @@ def delete_employee(employee_id: int, soft: bool = True):
     conn.close()
 
 def get_employee_by_name(name_text: str) -> Optional[Dict]:
-    """Найти сотрудника по имени"""
+    """Найти сотрудника по имени (только активных)"""
     employees = get_employees(active_only=True)
     if not name_text:
         return None
@@ -240,10 +257,52 @@ def get_employee_by_name(name_text: str) -> Optional[Dict]:
     
     return None
 
+def get_employee_by_id(employee_id: int) -> Optional[Dict]:
+    """Получить сотрудника по ID"""
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute('SELECT * FROM employees WHERE id = ? AND is_active = 1', (employee_id,))
+    row = c.fetchone()
+    conn.close()
+    
+    if row:
+        return {
+            'id': row['id'],
+            'full_name': row['full_name'],
+            'search_names': row['search_names'].split(',') if row['search_names'] else [],
+            'telegram_username': row['telegram_username'],
+            'email': row['email'],
+            'username': row['username'],
+            'status': row['status'] if 'status' in row.keys() else 'active',
+            'is_active': row['is_active']
+        }
+    return None
+
 def get_all_telegram_mentions() -> str:
-    """Получить все Telegram упоминания"""
+    """Получить все Telegram упоминания (только активных)"""
     employees = get_employees(active_only=True)
     return " ".join([emp['telegram_username'] for emp in employees])
+
+def get_active_employees_for_mention() -> List[Dict]:
+    """Получить сотрудников, которых можно тегать (статус 'active')"""
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute('''
+        SELECT * FROM employees 
+        WHERE is_active = 1 AND status = 'active'
+    ''')
+    rows = c.fetchall()
+    conn.close()
+    
+    employees = []
+    for row in rows:
+        employees.append({
+            'id': row['id'],
+            'full_name': row['full_name'],
+            'telegram_username': row['telegram_username'],
+            'status': row['status'] if 'status' in row.keys() else 'active'
+        })
+    return employees
 
 
 # ============ РАБОТА С НАСТРОЙКАМИ ============
@@ -361,8 +420,8 @@ def save_template(name: str, template: str):
     conn.commit()
     conn.close()
 
-def get_all_templates() -> Dict[str, str]:
-    """Получить все шаблоны"""
+def get_all_templates() -> Dict[str, Dict]:
+    """Получить все шаблоны с описаниями"""
     conn = get_db_connection()
     c = conn.cursor()
     c.execute('SELECT name, template, description FROM message_templates WHERE is_active = 1')
