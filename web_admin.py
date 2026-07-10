@@ -254,9 +254,8 @@ def api_bot_ping():
         import requests
         import config
         
-        # Простой запрос к Telegram API
         url = f"https://api.telegram.org/bot{config.BOT_TOKEN}/getMe"
-        response = requests.get(url, timeout=3)
+        response = requests.get(url, timeout=5)
         
         if response.status_code == 200:
             data = response.json()
@@ -265,18 +264,24 @@ def api_bot_ping():
                     'status': 'ok',
                     'message': '✅ OK',
                     'bot_name': data['result']['username'],
+                    'bot_id': data['result']['id'],
                     'timestamp': datetime.now().isoformat()
                 })
         
         return jsonify({
             'status': 'error',
-            'message': '❌ Недоступен'
+            'message': '❌ Недоступен: Telegram API вернул ошибку'
         }), 503
         
+    except requests.exceptions.Timeout:
+        return jsonify({
+            'status': 'error',
+            'message': '❌ Недоступен: Таймаут'
+        }), 503
     except Exception as e:
         return jsonify({
             'status': 'error',
-            'message': f'❌ Ошибка: {str(e)[:60]}'
+            'message': f'❌ Ошибка: {str(e)[:80]}'
         }), 503
 
 # ============ API: ЛОГ ОШИБОК ============
