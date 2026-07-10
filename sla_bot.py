@@ -690,9 +690,8 @@ class SLABot:
                         continue
                     
                     if not is_allowed:
-                        await self.bot.send_message(
-                            chat_id=chat_id,
-                            text="❌ Бот работает только в групповых чатах. Личные сообщения запрещены."
+                            # Просто игнорируем личные сообщения без ответа
+                            logger.info(f"⏭️ Игнорируем личное сообщение от {user_id}")
                         )
                         continue
                     
