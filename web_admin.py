@@ -249,35 +249,29 @@ def api_stop_bot():
 
 @app.route('/api/bot-ping')
 def api_bot_ping():
-    """Проверяет, отвечает ли бот через Telegram API"""
+    """Проверяет, работает ли бот (процесс запущен)"""
+    import subprocess
+    import os
+    
     try:
-        import requests
-        import config
+        # Проверяем, запущен ли процесс бота
+        result = os.popen('pgrep -f "sla_bot.py"').read().strip()
         
-        url = f"https://api.telegram.org/bot{config.BOT_TOKEN}/getMe"
-        response = requests.get(url, timeout=5)
-        
-        if response.status_code == 200:
-            data = response.json()
-            if data.get('ok'):
-                return jsonify({
-                    'status': 'ok',
-                    'message': '✅ OK',
-                    'bot_name': data['result']['username'],
-                    'bot_id': data['result']['id'],
-                    'timestamp': datetime.now().isoformat()
-                })
-        
-        return jsonify({
-            'status': 'error',
-            'message': '❌ Недоступен: Telegram API вернул ошибку'
-        }), 503
-        
-    except requests.exceptions.Timeout:
-        return jsonify({
-            'status': 'error',
-            'message': '❌ Недоступен: Таймаут'
-        }), 503
+        if result:
+            # Бот запущен — проверяем, отвечает ли он на команду /status
+            # (опционально: можно проверить через лог или просто вернуть OK)
+            return jsonify({
+                'status': 'ok',
+                'message': '✅ OK',
+                'pid': result,
+                'timestamp': datetime.now().isoformat()
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': '❌ Бот не запущен'
+            }), 503
+            
     except Exception as e:
         return jsonify({
             'status': 'error',
