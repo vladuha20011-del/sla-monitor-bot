@@ -244,6 +244,99 @@ def api_stop_bot():
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
+# ============ API: ПИНГ БОТА ============
+
+@app.route('/api/bot-ping')
+def api_bot_ping():
+    """Проверяет, отвечает ли бот через Telegram API"""
+    try:
+        from telegram import Bot
+        import config
+        bot = Bot(token=config.BOT_TOKEN)
+        me = bot.get_me()
+        return jsonify({
+            'status': 'ok',
+            'message': '✅ OK',
+            'bot_name': me.username,
+            'bot_id': me.id,
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'❌ Недоступен: {str(e)[:80]}'
+        }), 503
+
+# ============ API: ЛОГ ОШИБОК ============
+
+@app.route('/api/error-logs')
+def api_error_logs():
+    """Возвращает логи ошибок с расшифровкой"""
+    log_file = 'sla_bot.log'
+    errors = []
+    
+    if not os.path.exists(log_file):
+        return jsonify([])
+    
+    # Словарь расшифровок ошибок
+    error_map = {
+        "KeyError": {
+            'solution': 'В шаблоне используется переменная, которой нет в данных. Уберите её из шаблона в админке или добавьте в код.'
+        },
+        "ConnectionError": {
+            'solution': 'Проверьте доступность Jira и настройки подключения в config.py'
+        },
+        "TelegramError": {
+            'solution': 'Проверьте CHAT_ID и BOT_TOKEN в config.py. Бот должен быть добавлен в чат.'
+        },
+        "sqlite3.OperationalError": {
+            'solution': 'Ошибка в структуре БД. Удалите settings.db и перезапустите бота (данные будут созданы заново).'
+        },
+        "ModuleNotFoundError": {
+            'solution': 'Не установлен модуль. Установите: pip install <module>'
+        },
+        "TimeoutError": {
+            'solution': 'Таймаут подключения. Проверьте интернет-соединение, увеличьте таймаут в api_client.py.'
+        },
+        "JSONDecodeError": {
+            'solution': 'Jira вернул невалидный JSON. Проверьте ответ Jira, возможно ошибка авторизации.'
+        },
+        "PermissionError": {
+            'solution': 'Нет прав на запись в файл. Проверьте права на папку ~/sla-monitor-bot'
+        },
+        "FileNotFoundError": {
+            'solution': 'Файл не найден. Проверьте пути в коде.'
+        },
+        "TypeError": {
+            'solution': 'Ошибка типа данных. Проверьте формат данных, передаваемых в функцию.'
+        },
+        "ValueError": {
+            'solution': 'Неверное значение. Проверьте данные в БД или настройках.'
+        }
+    }
+    
+    try:
+        with open(log_file, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+            # Берём последние 1000 строк
+            for line in lines[-1000:]:
+                if 'ERROR' in line or 'Exception' in line or 'Traceback' in line:
+                    error_entry = {
+                        'timestamp': line[:19] if len(line) > 19 else '',
+                        'message': line.strip(),
+                        'solution': 'Обратитесь к администратору для анализа логов'
+                    }
+                    # Ищем расшифровку
+                    for key, info in error_map.items():
+                        if key in line:
+                            error_entry['solution'] = info['solution']
+                            break
+                    errors.append(error_entry)
+    except Exception as e:
+        return jsonify([{'timestamp': '', 'message': f'Ошибка чтения логов: {str(e)}', 'solution': 'Проверьте права на файл'}] )
+    
+    return jsonify(errors[-50:])  # последние 50 ошибок
+
 # ============ ЗАПУСК ============
 
 if __name__ == '__main__':
