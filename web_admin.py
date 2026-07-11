@@ -152,17 +152,21 @@ def api_save_templates():
 
 @app.route('/api/logs')
 def api_get_logs():
-    """Возвращает логи (упрощённо)"""
-    return '📄 Логи временно отключены для снижения нагрузки'
-
-@app.route('/api/logs', methods=['DELETE'])
-def api_clear_logs():
+    """Возвращает логи (последние 500 строк)"""
     log_file = 'sla_bot.log'
-    if os.path.exists(log_file):
-        with open(log_file, 'w', encoding='utf-8') as f:
-            f.write('')
-    return jsonify({'status': 'ok', 'message': 'Логи очищены'})
-
+    if not os.path.exists(log_file):
+        return 'Лог-файл не найден'
+    
+    try:
+        # Читаем ТОЛЬКО последние 500 строк (не весь файл!)
+        with open(log_file, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+            # Берём последние 500 строк
+            last_lines = lines[-500:] if len(lines) > 500 else lines
+            return ''.join(last_lines)
+    except Exception as e:
+        return f'Ошибка чтения логов: {e}'
+        
 # ============ API: ОШИБКИ (упрощённо) ============
 
 @app.route('/api/error-logs')
