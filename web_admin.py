@@ -170,7 +170,7 @@ def api_error_logs():
     """Возвращает логи ошибок (упрощённо)"""
     return jsonify([])
 
-# ============ API: СТАТИСТИКА (упрощённо) ============
+# ============ API: СТАТИСТИКА ============
 
 @app.route('/api/stats')
 def api_get_stats():
@@ -187,7 +187,7 @@ def api_get_stats():
         stats['bot_running'] = False
         stats['bot_pid'] = None
     
-    # НЕ ходим в Jira при каждом запросе (кешируем)
+    # Статистика по задачам (кешированная)
     stats['total_tasks'] = 0
     stats['urgent_tasks'] = 0
     
