@@ -172,6 +172,64 @@ def api_clear_logs():
             f.write('')
     return jsonify({'status': 'ok', 'message': 'Логи очищены'})
 
+# ============ API: ОШИБКИ ============
+
+@app.route('/api/error-logs')
+def api_error_logs():
+    """Возвращает логи ошибок с расшифровкой"""
+    log_file = 'sla_bot.log'
+    errors = []
+    
+    if not os.path.exists(log_file):
+        return jsonify([])
+    
+    error_map = {
+        "KeyError": {
+            'solution': 'В шаблоне используется переменная, которой нет в данных. Уберите её из шаблона в админке или добавьте в код.'
+        },
+        "ConnectionError": {
+            'solution': 'Проверьте доступность Jira и настройки подключения в config.py'
+        },
+        "TelegramError": {
+            'solution': 'Проверьте CHAT_ID и BOT_TOKEN в config.py. Бот должен быть добавлен в чат.'
+        },
+        "sqlite3.OperationalError": {
+            'solution': 'Ошибка в структуре БД. Удалите settings.db и перезапустите бота (данные будут созданы заново).'
+        },
+        "ModuleNotFoundError": {
+            'solution': 'Не установлен модуль. Установите: pip install <module>'
+        },
+        "TimeoutError": {
+            'solution': 'Таймаут подключения. Проверьте интернет-соединение, увеличьте таймаут в api_client.py.'
+        },
+        "JSONDecodeError": {
+            'solution': 'Jira вернул невалидный JSON. Проверьте ответ Jira, возможно ошибка авторизации.'
+        },
+        "PermissionError": {
+            'solution': 'Нет прав на запись в файл. Проверьте права на папку ~/sla-monitor-bot'
+        }
+    }
+    
+    try:
+        with open(log_file, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+            for line in lines[-1000:]:
+                if 'ERROR' in line or 'Exception' in line or 'Traceback' in line:
+                    error_entry = {
+                        'timestamp': line[:19] if len(line) > 19 else '',
+                        'message': line.strip(),
+                        'solution': 'Обратитесь к администратору для анализа логов'
+                    }
+                    for key, info in error_map.items():
+                        if key in line:
+                            error_entry['solution'] = info['solution']
+                            break
+                    errors.append(error_entry)
+    except Exception as e:
+        return jsonify([{'timestamp': '', 'message': f'Ошибка чтения логов: {str(e)}', 'solution': 'Проверьте права на файл'}])
+    
+    return jsonify(errors[-50:])
+
 # ============ API: СТАТИСТИКА ============
 
 @app.route('/api/stats')
@@ -245,32 +303,62 @@ def api_stop_bot():
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
-# ============ API: ПИНГ БОТА ============
+# ============ API: ПИНГ ============
 
 @app.route('/api/bot-ping')
 def api_bot_ping():
-    """Проверяет, работает ли бот (процесс запущен)"""
-    import subprocess
-    import os
-    
+    """Проверяет, работает ли бот (процесс + свежие логи)"""
     try:
-        # Проверяем, запущен ли процесс бота
         result = os.popen('pgrep -f "sla_bot.py"').read().strip()
-        
-        if result:
-            # Бот запущен — проверяем, отвечает ли он на команду /status
-            # (опционально: можно проверить через лог или просто вернуть OK)
-            return jsonify({
-                'status': 'ok',
-                'message': '✅ OK',
-                'pid': result,
-                'timestamp': datetime.now().isoformat()
-            })
-        else:
+        if not result:
             return jsonify({
                 'status': 'error',
                 'message': '❌ Бот не запущен'
             }), 503
+        
+        log_file = 'sla_bot.log'
+        if not os.path.exists(log_file):
+            return jsonify({
+                'status': 'error',
+                'message': '❌ Лог-файл не найден'
+            }), 503
+        
+        with open(log_file, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+            if not lines:
+                return jsonify({
+                    'status': 'error',
+                    'message': '❌ Лог пуст'
+                }), 503
+            
+            last_line = lines[-1]
+            import re
+            match = re.search(r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})', last_line)
+            
+            if not match:
+                return jsonify({
+                    'status': 'error',
+                    'message': '❌ Не удалось определить время последней записи'
+                }), 503
+            
+            last_time_str = match.group(1)
+            last_time = datetime.strptime(last_time_str, '%Y-%m-%d %H:%M:%S')
+            now = datetime.now()
+            diff = now - last_time
+            
+            if diff.total_seconds() > 10800:  # 3 часа
+                return jsonify({
+                    'status': 'error',
+                    'message': f'❌ Бот не активен ({diff.total_seconds() / 3600:.1f}ч назад)'
+                }), 503
+            
+            return jsonify({
+                'status': 'ok',
+                'message': f'✅ OK ({diff.total_seconds() / 60:.0f} мин назад)',
+                'pid': result,
+                'last_log': last_time_str,
+                'timestamp': datetime.now().isoformat()
+            })
             
     except Exception as e:
         return jsonify({
@@ -278,75 +366,107 @@ def api_bot_ping():
             'message': f'❌ Ошибка: {str(e)[:80]}'
         }), 503
 
-# ============ API: ЛОГ ОШИБОК ============
+# ============ API: УВЕДОМЛЕНИЯ ============
 
-@app.route('/api/error-logs')
-def api_error_logs():
-    """Возвращает логи ошибок с расшифровкой"""
-    log_file = 'sla_bot.log'
-    errors = []
-    
-    if not os.path.exists(log_file):
-        return jsonify([])
-    
-    # Словарь расшифровок ошибок
-    error_map = {
-        "KeyError": {
-            'solution': 'В шаблоне используется переменная, которой нет в данных. Уберите её из шаблона в админке или добавьте в код.'
-        },
-        "ConnectionError": {
-            'solution': 'Проверьте доступность Jira и настройки подключения в config.py'
-        },
-        "TelegramError": {
-            'solution': 'Проверьте CHAT_ID и BOT_TOKEN в config.py. Бот должен быть добавлен в чат.'
-        },
-        "sqlite3.OperationalError": {
-            'solution': 'Ошибка в структуре БД. Удалите settings.db и перезапустите бота (данные будут созданы заново).'
-        },
-        "ModuleNotFoundError": {
-            'solution': 'Не установлен модуль. Установите: pip install <module>'
-        },
-        "TimeoutError": {
-            'solution': 'Таймаут подключения. Проверьте интернет-соединение, увеличьте таймаут в api_client.py.'
-        },
-        "JSONDecodeError": {
-            'solution': 'Jira вернул невалидный JSON. Проверьте ответ Jira, возможно ошибка авторизации.'
-        },
-        "PermissionError": {
-            'solution': 'Нет прав на запись в файл. Проверьте права на папку ~/sla-monitor-bot'
-        },
-        "FileNotFoundError": {
-            'solution': 'Файл не найден. Проверьте пути в коде.'
-        },
-        "TypeError": {
-            'solution': 'Ошибка типа данных. Проверьте формат данных, передаваемых в функцию.'
-        },
-        "ValueError": {
-            'solution': 'Неверное значение. Проверьте данные в БД или настройках.'
-        }
-    }
-    
+@app.route('/api/task/<task_key>')
+def api_get_task(task_key):
+    """Получить информацию о задаче по ключу"""
     try:
-        with open(log_file, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
-            # Берём последние 1000 строк
-            for line in lines[-1000:]:
-                if 'ERROR' in line or 'Exception' in line or 'Traceback' in line:
-                    error_entry = {
-                        'timestamp': line[:19] if len(line) > 19 else '',
-                        'message': line.strip(),
-                        'solution': 'Обратитесь к администратору для анализа логов'
-                    }
-                    # Ищем расшифровку
-                    for key, info in error_map.items():
-                        if key in line:
-                            error_entry['solution'] = info['solution']
-                            break
-                    errors.append(error_entry)
+        import asyncio
+        from api_client import TaskAPIClient
+        
+        async def get_task():
+            client = TaskAPIClient()
+            return await client.get_task_by_key(task_key)
+        
+        task = asyncio.run(get_task())
+        
+        if task:
+            return jsonify(task)
+        else:
+            return jsonify({'error': 'Задача не найдена'}), 404
+            
     except Exception as e:
-        return jsonify([{'timestamp': '', 'message': f'Ошибка чтения логов: {str(e)}', 'solution': 'Проверьте права на файл'}] )
-    
-    return jsonify(errors[-50:])  # последние 50 ошибок
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/send-notification', methods=['POST'])
+def api_send_notification():
+    """Отправить уведомление по задаче"""
+    try:
+        import asyncio
+        from telegram import Bot
+        import config
+        from api_client import TaskAPIClient
+        import db_manager
+        
+        data = request.json
+        task_key = data.get('task_key')
+        priority = data.get('priority', 'Обычное')
+        
+        if not task_key:
+            return jsonify({'error': 'Не указан номер задачи'}), 400
+        
+        async def get_task():
+            client = TaskAPIClient()
+            return await client.get_task_by_key(task_key)
+        
+        task = asyncio.run(get_task())
+        
+        if not task:
+            return jsonify({'error': 'Задача не найдена'}), 404
+        
+        employee = db_manager.get_employee_by_name(task['assignee'])
+        mention = employee['telegram_username'] if employee else f"@{task['assignee'].replace(' ', '_')}"
+        
+        priority_emoji = {
+            'Обычное': '📨',
+            'Важное': '⚠️',
+            'Срочное': '🚨',
+            'Критичное': '🔥'
+        }
+        
+        priority_header = {
+            'Обычное': 'Уведомление по задаче',
+            'Важное': 'ВАЖНОЕ УВЕДОМЛЕНИЕ!',
+            'Срочное': 'СРОЧНОЕ УВЕДОМЛЕНИЕ! 🚨',
+            'Критичное': 'КРИТИЧНОЕ УВЕДОМЛЕНИЕ! 🔥'
+        }
+        
+        emoji = priority_emoji.get(priority, '📨')
+        header = priority_header.get(priority, 'Уведомление по задаче')
+        
+        due_date_str = task['due_date'].strftime('%d.%m.%Y %H:%M') if task.get('due_date') else 'не указан'
+        
+        message = f"{emoji} {header}\n\n"
+        message += f"📌 Задача: {task['id']}\n"
+        message += f"🔗 Ссылка: {task['url']}\n"
+        message += f"📋 Название: {task['title']}\n"
+        message += f"👤 Исполнитель: {task['assignee']} {mention}\n"
+        message += f"📈 Статус: {task['status']}\n"
+        message += f"⏰ Дедлайн: {due_date_str}\n"
+        message += f"🎯 Приоритет: {task['priority'] or 'Не указан'}\n\n"
+        
+        if priority == 'Важное':
+            message += "❗ Просьба обратить внимание на задачу!"
+        elif priority == 'Срочное':
+            message += "❗ Требуется срочное внимание к задаче!"
+        elif priority == 'Критичное':
+            message += "⛔ Задача требует немедленного решения!"
+        else:
+            message += "Просьба обратить внимание на задачу."
+        
+        bot = Bot(token=config.BOT_TOKEN)
+        chat_id = config.CHAT_ID
+        
+        await bot.send_message(chat_id=chat_id, text=message)
+        
+        return jsonify({'status': 'ok', 'message': '✅ Уведомление отправлено'})
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка отправки уведомления: {e}")
+        return jsonify({'error': str(e)}), 500
+
 
 # ============ ЗАПУСК ============
 
