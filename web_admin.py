@@ -7,6 +7,7 @@ from datetime import datetime
 import os
 import time
 import logging
+import re
 
 import db_manager
 
@@ -16,9 +17,56 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
+# ============ ФУНКЦИЯ ПАРСИНГА ОШИБОК ============
+
+def parse_and_save_errors():
+    """Парсит лог и сохраняет ошибки в БД (если их там ещё нет)"""
+    log_file = 'sla_bot.log'
+    if not os.path.exists(log_file):
+        return
+    
+    error_map = {
+        "KeyError": "В шаблоне используется переменная, которой нет в данных. Уберите её из шаблона в админке.",
+        "ConnectionError": "Проверьте доступность Jira и настройки подключения в config.py",
+        "TelegramError": "Проверьте CHAT_ID и BOT_TOKEN в config.py.",
+        "sqlite3.OperationalError": "Ошибка в структуре БД. Удалите settings.db и перезапустите бота.",
+        "ModuleNotFoundError": "Не установлен модуль. Установите: pip install <module>",
+        "TimeoutError": "Таймаут подключения. Проверьте интернет-соединение.",
+        "JSONDecodeError": "Jira вернул невалидный JSON. Проверьте ответ Jira.",
+        "PermissionError": "Нет прав на запись в файл. Проверьте права на папку."
+    }
+    
+    try:
+        with open(log_file, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+            last_lines = lines[-500:] if len(lines) > 500 else lines
+            
+            for line in last_lines:
+                if 'ERROR' in line or 'Exception' in line or 'Traceback' in line:
+                    # Проверяем, есть ли уже такая ошибка в БД
+                    existing = db_manager.get_error_logs('all')
+                    exists = any(line.strip() == e['message'] for e in existing)
+                    if exists:
+                        continue
+                    
+                    timestamp = line[:19] if len(line) > 19 else ''
+                    solution = 'Обратитесь к администратору'
+                    
+                    for key, sol in error_map.items():
+                        if key in line:
+                            solution = sol
+                            break
+                    
+                    db_manager.save_error_log(timestamp, line.strip(), solution)
+    except Exception as e:
+        logger.error(f"Ошибка парсинга логов: {e}")
+
+
 # ============ ИНИЦИАЛИЗАЦИЯ ============
 
 db_manager.init_db()
+parse_and_save_errors()
 
 # Переносим сотрудников из employees.py если они есть
 try:
@@ -47,6 +95,7 @@ def index():
 @app.route('/login')
 def login():
     return render_template('index.html')
+
 
 # ============ API: СОТРУДНИКИ ============
 
@@ -98,6 +147,7 @@ def api_delete_employee(employee_id):
     db_manager.delete_employee(employee_id, soft=True)
     return jsonify({'status': 'ok', 'message': 'Сотрудник удалён'})
 
+
 # ============ API: НАСТРОЙКИ ============
 
 @app.route('/api/settings')
@@ -110,6 +160,7 @@ def api_update_settings():
     data = request.json
     db_manager.update_settings(data)
     return jsonify({'status': 'ok', 'message': 'Настройки сохранены'})
+
 
 # ============ API: СТАТУСЫ ============
 
@@ -135,6 +186,7 @@ def api_delete_status(name):
     db_manager.delete_task_status(name, soft=True)
     return jsonify({'status': 'ok', 'message': 'Статус удалён'})
 
+
 # ============ API: ШАБЛОНЫ ============
 
 @app.route('/api/templates')
@@ -148,7 +200,8 @@ def api_save_templates():
     db_manager.save_templates(data)
     return jsonify({'status': 'ok', 'message': 'Шаблоны сохранены'})
 
-# ============ API: ЛОГИ (упрощённо) ============
+
+# ============ API: ЛОГИ ============
 
 @app.route('/api/logs')
 def api_get_logs():
@@ -158,75 +211,51 @@ def api_get_logs():
         return 'Лог-файл не найден'
     
     try:
-        # Читаем ТОЛЬКО последние 500 строк (не весь файл!)
         with open(log_file, 'r', encoding='utf-8') as f:
             lines = f.readlines()
-            # Берём последние 500 строк
             last_lines = lines[-500:] if len(lines) > 500 else lines
             return ''.join(last_lines)
     except Exception as e:
         return f'Ошибка чтения логов: {e}'
-        
-# ============ API: ОШИБКИ (упрощённо) ============
+
+@app.route('/api/logs', methods=['DELETE'])
+def api_clear_logs():
+    log_file = 'sla_bot.log'
+    if os.path.exists(log_file):
+        with open(log_file, 'w', encoding='utf-8') as f:
+            f.write('')
+    return jsonify({'status': 'ok', 'message': 'Логи очищены'})
+
+
+# ============ API: ОШИБКИ ============
 
 @app.route('/api/error-logs')
 def api_error_logs():
-    """Возвращает логи ошибок с расшифровкой (последние 100 строк)"""
-    log_file = 'sla_bot.log'
-    errors = []
+    """Возвращает логи ошибок с расшифровкой и статусами"""
+    status_filter = request.args.get('status', 'active')
+    errors = db_manager.get_error_logs(status_filter)
+    return jsonify(errors)
+
+
+@app.route('/api/error-logs/<int:error_id>/status', methods=['PUT'])
+def api_update_error_status(error_id):
+    """Обновить статус ошибки"""
+    data = request.json
+    new_status = data.get('status')
     
-    if not os.path.exists(log_file):
-        return jsonify([])
+    if new_status not in ['new', 'in_progress', 'done']:
+        return jsonify({'error': 'Неверный статус'}), 400
     
-    error_map = {
-        "KeyError": {
-            'solution': 'В шаблоне используется переменная, которой нет в данных. Уберите её из шаблона в админке или добавьте в код.'
-        },
-        "ConnectionError": {
-            'solution': 'Проверьте доступность Jira и настройки подключения в config.py'
-        },
-        "TelegramError": {
-            'solution': 'Проверьте CHAT_ID и BOT_TOKEN в config.py. Бот должен быть добавлен в чат.'
-        },
-        "sqlite3.OperationalError": {
-            'solution': 'Ошибка в структуре БД. Удалите settings.db и перезапустите бота (данные будут созданы заново).'
-        },
-        "ModuleNotFoundError": {
-            'solution': 'Не установлен модуль. Установите: pip install <module>'
-        },
-        "TimeoutError": {
-            'solution': 'Таймаут подключения. Проверьте интернет-соединение, увеличьте таймаут в api_client.py.'
-        },
-        "JSONDecodeError": {
-            'solution': 'Jira вернул невалидный JSON. Проверьте ответ Jira, возможно ошибка авторизации.'
-        },
-        "PermissionError": {
-            'solution': 'Нет прав на запись в файл. Проверьте права на папку ~/sla-monitor-bot'
-        }
-    }
-    
-    try:
-        with open(log_file, 'r', encoding='utf-8') as f:
-            # Читаем ТОЛЬКО последние 500 строк
-            lines = f.readlines()
-            last_lines = lines[-500:] if len(lines) > 500 else lines
-            
-            for line in last_lines:
-                if 'ERROR' in line or 'Exception' in line or 'Traceback' in line:
-                    error_entry = {
-                        'timestamp': line[:19] if len(line) > 19 else '',
-                        'message': line.strip(),
-                        'solution': 'Обратитесь к администратору для анализа логов'
-                    }
-                    for key, info in error_map.items():
-                        if key in line:
-                            error_entry['solution'] = info['solution']
-                            break
-                    errors.append(error_entry)
-    except Exception as e:
-        return jsonify([{'timestamp': '', 'message': f'Ошибка чтения логов: {str(e)}', 'solution': 'Проверьте права на файл'}])
-    
-    return jsonify(errors[-50:])  # последние 50 ошибок
+    db_manager.update_error_status(error_id, new_status)
+    return jsonify({'status': 'ok', 'message': 'Статус обновлён'})
+
+
+@app.route('/api/error-logs/clear-done', methods=['DELETE'])
+def api_clear_done_errors():
+    """Удалить выполненные ошибки"""
+    deleted = db_manager.delete_done_errors()
+    return jsonify({'status': 'ok', 'message': f'Удалено {deleted} выполненных ошибок'})
+
 
 # ============ API: СТАТИСТИКА ============
 
@@ -245,11 +274,11 @@ def api_get_stats():
         stats['bot_running'] = False
         stats['bot_pid'] = None
     
-    # Статистика по задачам (кешированная)
     stats['total_tasks'] = 0
     stats['urgent_tasks'] = 0
     
     return jsonify(stats)
+
 
 # ============ API: УПРАВЛЕНИЕ БОТОМ ============
 
@@ -278,6 +307,7 @@ def api_restart_bot():
         logger.error(f"❌ Ошибка перезапуска: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
+
 @app.route('/api/stop', methods=['POST'])
 def api_stop_bot():
     try:
@@ -287,11 +317,12 @@ def api_stop_bot():
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
-# ============ API: ПИНГ (упрощённо) ============
+
+# ============ API: ПИНГ ============
 
 @app.route('/api/bot-ping')
 def api_bot_ping():
-    """Проверяет, работает ли бот (только процесс)"""
+    """Упрощённый пинг — только проверка процесса"""
     import os
     result = os.popen('pgrep -f "sla_bot.py"').read().strip()
     if result:
@@ -307,11 +338,12 @@ def api_bot_ping():
             'message': '❌ Бот не запущен'
         }), 503
 
+
 # ============ API: УВЕДОМЛЕНИЯ ============
 
 @app.route('/api/task/<task_key>')
 def api_get_task(task_key):
-    """Получить информацию о задаче по ключу (с Jira)"""
+    """Получить информацию о задаче по ключу"""
     try:
         import asyncio
         from api_client import TaskAPIClient
@@ -323,11 +355,9 @@ def api_get_task(task_key):
         task = asyncio.run(get_task())
         
         if task:
-            # Форматируем дату для отображения
             if task.get('due_date'):
                 task['due_date'] = task['due_date'].isoformat() if hasattr(task['due_date'], 'isoformat') else str(task['due_date'])
             
-            # Добавляем created_formatted если есть
             if task.get('created'):
                 try:
                     from datetime import datetime
@@ -350,7 +380,7 @@ def api_send_notification():
     """Отправить уведомление по задаче"""
     try:
         import asyncio
-        from telegram import Bot
+        import requests
         import config
         from api_client import TaskAPIClient
         import db_manager
@@ -362,7 +392,6 @@ def api_send_notification():
         if not task_key:
             return jsonify({'error': 'Не указан номер задачи'}), 400
         
-        # Получаем задачу
         async def get_task():
             client = TaskAPIClient()
             return await client.get_task_by_key(task_key)
@@ -373,7 +402,13 @@ def api_send_notification():
             return jsonify({'error': 'Задача не найдена'}), 404
         
         employee = db_manager.get_employee_by_name(task['assignee'])
-        mention = employee['telegram_username'] if employee else f"@{task['assignee'].replace(' ', '_')}"
+        
+        # Проверяем статус сотрудника
+        if employee and employee.get('status') == 'active':
+            mention = employee['telegram_username']
+        else:
+            mention = task['assignee']
+            logger.info(f"⏭️ Тег пропущен: сотрудник {task['assignee']} в статусе '{employee.get('status') if employee else 'не найден'}'")
         
         priority_emoji = {
             'Обычное': '📨',
@@ -398,7 +433,7 @@ def api_send_notification():
         message += f"📌 Задача: {task['id']}\n"
         message += f"🔗 Ссылка: {task['url']}\n"
         message += f"📋 Название: {task['title']}\n"
-        message += f"👤 Исполнитель: {task['assignee']} {mention}\n"
+        message += f"👤 Исполнитель: {task['assignee']} {mention if mention != task['assignee'] else ''}\n"
         message += f"📈 Статус: {task['status']}\n"
         message += f"⏰ Дедлайн: {due_date_str}\n"
         message += f"🎯 Приоритет: {task['priority'] or 'Не указан'}\n\n"
@@ -412,8 +447,6 @@ def api_send_notification():
         else:
             message += "Просьба обратить внимание на задачу."
         
-        # ОТПРАВЛЯЕМ ЧЕРЕЗ СИНХРОННЫЙ МЕТОД
-        import requests
         bot_token = config.BOT_TOKEN
         chat_id = config.CHAT_ID
         
@@ -421,7 +454,6 @@ def api_send_notification():
         payload = {
             "chat_id": chat_id,
             "text": message,
-            "parse_mode": "HTML",
             "disable_web_page_preview": True
         }
         
