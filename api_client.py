@@ -268,14 +268,12 @@ class TaskAPIClient:
         Возвращает (дата, источник, оставшееся_время_текст)
         """
         
-        # 1. Проверяем стандартное поле duedate
         due_date = fields.get('duedate')
         if due_date:
             parsed = self._parse_date(due_date)
             if parsed:
                 return parsed, "duedate", None
         
-        # 2. Проверяем SLA поле customfield_10611 (время до решения)
         sla_data = fields.get('customfield_10611')
         if sla_data and isinstance(sla_data, dict):
             ongoing_cycle = sla_data.get('ongoingCycle')
@@ -307,7 +305,6 @@ class TaskAPIClient:
                             if parsed:
                                 return parsed, "customfield_10611 (completed)", None
         
-        # 3. Проверяем SLA поле customfield_10612 (время до первого отклика)
         sla_data2 = fields.get('customfield_10612')
         if sla_data2 and isinstance(sla_data2, dict):
             ongoing_cycle = sla_data2.get('ongoingCycle')
@@ -320,7 +317,6 @@ class TaskAPIClient:
                     due_date = datetime.now() + timedelta(milliseconds=remaining_ms)
                     return due_date, "customfield_10612 (SLA отклик)", remaining_text
         
-        # 4. Проверяем другие SLA поля
         other_sla_fields = ['customfield_10303', 'customfield_10305', 'customfield_11717']
         for field in other_sla_fields:
             value = fields.get(field)
