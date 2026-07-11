@@ -303,69 +303,6 @@ def api_stop_bot():
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
-# ============ API: ПИНГ ============
-
-@app.route('/api/bot-ping')
-def api_bot_ping():
-    """Проверяет, работает ли бот (процесс + свежие логи)"""
-    try:
-        result = os.popen('pgrep -f "sla_bot.py"').read().strip()
-        if not result:
-            return jsonify({
-                'status': 'error',
-                'message': '❌ Бот не запущен'
-            }), 503
-        
-        log_file = 'sla_bot.log'
-        if not os.path.exists(log_file):
-            return jsonify({
-                'status': 'error',
-                'message': '❌ Лог-файл не найден'
-            }), 503
-        
-        with open(log_file, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
-            if not lines:
-                return jsonify({
-                    'status': 'error',
-                    'message': '❌ Лог пуст'
-                }), 503
-            
-            last_line = lines[-1]
-            import re
-            match = re.search(r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})', last_line)
-            
-            if not match:
-                return jsonify({
-                    'status': 'error',
-                    'message': '❌ Не удалось определить время последней записи'
-                }), 503
-            
-            last_time_str = match.group(1)
-            last_time = datetime.strptime(last_time_str, '%Y-%m-%d %H:%M:%S')
-            now = datetime.now()
-            diff = now - last_time
-            
-            if diff.total_seconds() > 10800:  # 3 часа
-                return jsonify({
-                    'status': 'error',
-                    'message': f'❌ Бот не активен ({diff.total_seconds() / 3600:.1f}ч назад)'
-                }), 503
-            
-            return jsonify({
-                'status': 'ok',
-                'message': f'✅ OK ({diff.total_seconds() / 60:.0f} мин назад)',
-                'pid': result,
-                'last_log': last_time_str,
-                'timestamp': datetime.now().isoformat()
-            })
-            
-    except Exception as e:
-        return jsonify({
-            'status': 'error',
-            'message': f'❌ Ошибка: {str(e)[:80]}'
-        }), 503
-
 # ============ API: УВЕДОМЛЕНИЯ ============
 
 @app.route('/api/task/<task_key>')
