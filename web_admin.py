@@ -362,6 +362,7 @@ def api_send_notification():
         if not task_key:
             return jsonify({'error': 'Не указан номер задачи'}), 400
         
+        # Получаем задачу
         async def get_task():
             client = TaskAPIClient()
             return await client.get_task_by_key(task_key)
@@ -411,12 +412,26 @@ def api_send_notification():
         else:
             message += "Просьба обратить внимание на задачу."
         
-        bot = Bot(token=config.BOT_TOKEN)
+        # ОТПРАВЛЯЕМ ЧЕРЕЗ СИНХРОННЫЙ МЕТОД
+        import requests
+        bot_token = config.BOT_TOKEN
         chat_id = config.CHAT_ID
         
-        bot.send_message(chat_id=chat_id, text=message)
+        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        payload = {
+            "chat_id": chat_id,
+            "text": message,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True
+        }
         
-        return jsonify({'status': 'ok', 'message': '✅ Уведомление отправлено'})
+        response = requests.post(url, json=payload, timeout=10)
+        
+        if response.status_code == 200:
+            return jsonify({'status': 'ok', 'message': '✅ Уведомление отправлено'})
+        else:
+            logger.error(f"❌ Ошибка Telegram API: {response.status_code} - {response.text}")
+            return jsonify({'error': f'Ошибка Telegram API: {response.status_code}'}), 500
         
     except Exception as e:
         logger.error(f"❌ Ошибка отправки уведомления: {e}")
