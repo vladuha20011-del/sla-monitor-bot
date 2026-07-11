@@ -136,7 +136,7 @@ class SLABot:
                 reopen_date_str = str(task['reopen_date'])[:16]
         return reopen_date_str
     
-    def _save_to_history(self, message_text: str, tasks: list = None, is_excel: bool = False, excel_data: str = None, excel_filename: str = None):
+    def _save_to_history(self, message_text: str, tasks: list = None, is_excel: bool = False, excel_data: str = None, excel_filename: str = None, status: str = 'sent', error_text: str = None):
         """Сохраняет отправленное сообщение в историю"""
         try:
             db_manager.save_notification_history(
@@ -144,11 +144,21 @@ class SLABot:
                 tasks=tasks,
                 is_excel=is_excel,
                 excel_data=excel_data,
-                excel_filename=excel_filename
+                excel_filename=excel_filename,
+                status=status,
+                error_text=error_text
             )
             logger.info("📝 Уведомление сохранено в историю")
         except Exception as e:
             logger.error(f"❌ Ошибка сохранения в историю: {e}")
+    
+    def _get_sent_task_keys(self) -> set:
+        """Получить ID задач, которые уже были отправлены (из БД)"""
+        try:
+            return db_manager.get_sent_task_keys_from_history()
+        except Exception as e:
+            logger.error(f"❌ Ошибка получения отправленных задач: {e}")
+            return set()
     
     async def is_user_admin(self, chat_id: int, user_id: int) -> bool:
         try:
@@ -210,10 +220,14 @@ class SLABot:
                 logger.info("✅ Нет задач для уведомления")
                 return
             
-            new_tasks = [t for t in tasks_to_notify if t['id'] not in self.notified_tasks]
+            # Получаем уже отправленные задачи из БД
+            sent_task_keys = self._get_sent_task_keys()
+            
+            # Исключаем уже отправленные
+            new_tasks = [t for t in tasks_to_notify if t['id'] not in sent_task_keys]
             
             if not new_tasks:
-                logger.info("✅ Нет новых задач для уведомления")
+                logger.info("✅ Нет новых задач для уведомления (все уже отправлены)")
                 return
             
             new_tasks.sort(key=lambda x: x['hours_until_due'])
@@ -280,13 +294,16 @@ class SLABot:
             
             # Сохраняем в историю
             excel_data = "\n".join([f"{t.get('id', '')}|{t.get('title', '')}|{t.get('assignee', '')}" for t in tasks])
-            self._save_to_history(caption, tasks, is_excel=True, excel_data=excel_data, excel_filename=excel_file.name)
+            self._save_to_history(caption, tasks, is_excel=True, excel_data=excel_data, excel_filename=excel_file.name, status='sent')
             
             for task in tasks:
                 self.notified_tasks.add(task['id'])
                 
-        except TelegramError as e:
+        except Exception as e:
             logger.error(f"❌ Ошибка отправки Excel отчёта: {e}")
+            # Сохраняем черновик
+            excel_data = "\n".join([f"{t.get('id', '')}|{t.get('title', '')}|{t.get('assignee', '')}" for t in tasks])
+            self._save_to_history(caption, tasks, is_excel=True, excel_data=excel_data, excel_filename='draft.xlsx', status='pending', error_text=str(e))
     
     async def _send_bulk_notification(self, tasks: list, is_manual: bool = False):
         """Отправляет одно общее уведомление со всеми задачами (текстом)"""
@@ -314,6 +331,7 @@ class SLABot:
         
         message = f"{header}\n\n"
         messages_sent = 0
+        error_occurred = False
         
         for i, task in enumerate(tasks):
             if should_mention:
@@ -325,16 +343,13 @@ class SLABot:
             else:
                 assignee_display = task['assignee']
             
-            # Получаем статус SLA
             hours = task.get('hours_until_due', 0)
             sla_status_display = self._get_sla_status(hours)
             
-            # Информация о переоткрытии
             reopen_info = ""
             if task.get('was_reopened') and task.get('reopen_formatted'):
                 reopen_info = f"\n🔄 Переоткрыта: {task.get('reopen_formatted')}"
             
-            # Формируем задачу по шаблону
             try:
                 task_display = task_format.format(
                     id=task.get('id', ''),
@@ -350,10 +365,8 @@ class SLABot:
                 )
             except KeyError as e:
                 logger.error(f"❌ Ошибка форматирования: отсутствует переменная {e}")
-                # fallback — используем простой формат
                 task_display = f"• {task.get('title', 'Без названия')} — {assignee_display}"
             
-            # Добавляем информацию о переоткрытии
             if reopen_info:
                 task_display += reopen_info
             
@@ -362,20 +375,23 @@ class SLABot:
             if i < len(tasks) - 1:
                 message += f"{'—' * 45}\n\n"
             
-            if not is_manual:
-                self.notified_tasks.add(task['id'])
+            self.notified_tasks.add(task['id'])
             
             if len(message) > 3500:
                 message += f"\n{footer}"
-                await self.bot.send_message(
-                    chat_id=self.chat_id,
-                    text=message,
-                    disable_web_page_preview=True
-                )
-                messages_sent += 1
-                logger.info(f"📨 Отправлена часть {messages_sent}")
-                await asyncio.sleep(2)
-                message = f"{header} (продолжение)\n\n"
+                try:
+                    await self.bot.send_message(
+                        chat_id=self.chat_id,
+                        text=message,
+                        disable_web_page_preview=True
+                    )
+                    messages_sent += 1
+                    logger.info(f"📨 Отправлена часть {messages_sent}")
+                    await asyncio.sleep(2)
+                    message = f"{header} (продолжение)\n\n"
+                except Exception as e:
+                    error_occurred = True
+                    logger.error(f"❌ Ошибка отправки части сообщения: {e}")
         
         if message and not message.endswith(footer):
             message += f"\n{footer}"
@@ -390,11 +406,15 @@ class SLABot:
                 messages_sent += 1
                 logger.info(f"✅ Отправлено общее уведомление с {len(tasks)} задачами")
                 
-                # Сохраняем в историю
-                self._save_to_history(message, tasks)
+                if not error_occurred:
+                    self._save_to_history(message, tasks, status='sent')
+                else:
+                    self._save_to_history(message, tasks, status='pending', error_text='Частичная ошибка отправки')
                 
-            except TelegramError as e:
+            except Exception as e:
+                error_occurred = True
                 logger.error(f"❌ Ошибка отправки общего уведомления: {e}")
+                self._save_to_history(message, tasks, status='pending', error_text=str(e))
     
     async def _generate_excel_report(self, tasks: list) -> io.BytesIO:
         """Генерирует Excel файл с отчётом по задачам"""
@@ -714,7 +734,6 @@ class SLABot:
                         logger.info(f"⏭️ Игнорируем личное сообщение от {user_id}")
                         continue
                     
-                    # Игнорируем ответы, если настроено
                     if self.settings.get('IGNORE_REPLIES', True) and update.message.reply_to_message:
                         logger.debug("⏭️ Игнорируем ответ на сообщение")
                         continue
@@ -781,12 +800,13 @@ class SLABot:
                             )
                             continue
                         
-                        new_tasks = [t for t in tasks_to_notify if t['id'] not in self.notified_tasks]
+                        sent_task_keys = self._get_sent_task_keys()
+                        new_tasks = [t for t in tasks_to_notify if t['id'] not in sent_task_keys]
                         
                         if not new_tasks:
                             await self.bot.send_message(
                                 chat_id=chat_id,
-                                text="✅ Нет новых задач с истекающим SLA"
+                                text="✅ Нет новых задач с истекающим SLA (все уже отправлены)"
                             )
                             continue
                         
@@ -941,7 +961,6 @@ class SLABot:
                             )
                             continue
                         
-                        # Проверяем, нужно ли показывать теги
                         show_mentions = self.settings.get('TAG_ENABLED', True)
                         
                         if show_mentions:
@@ -949,11 +968,9 @@ class SLABot:
                         else:
                             assignee_display = task['assignee']
                         
-                        # Формируем сообщение по шаблону из БД
                         check_template = self.templates.get('check_task_format', 
                             '📌 Задача: {id}\n📋 Название: {title}\n🔗 Ссылка: {url}\n\n👤 Исполнитель: {assignee}\n📅 Создана: {created}\n⏰ Осталось: {remaining}\n📈 Статус задачи: {status}\n🎯 Приоритет: {priority}')
                         
-                        # Определяем статус SLA для отображения
                         sla_status_display = self._get_sla_status(task.get('hours_until_due', 0))
                         
                         task_info = check_template.format(
@@ -968,7 +985,6 @@ class SLABot:
                             sla_status=sla_status_display
                         )
                         
-                        # Добавляем информацию о переоткрытии
                         if task.get('was_reopened') and task.get('reopen_formatted'):
                             task_info += f"\n🔄 Переоткрыта: {task.get('reopen_formatted')}"
                         
