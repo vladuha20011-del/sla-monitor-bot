@@ -29,7 +29,6 @@ class TaskAPIClient:
         Использует статусы из БД (notify_enabled = 1)
         """
         try:
-            # ===== ИЗМЕНЕНИЕ: статусы из БД =====
             import db_manager
             statuses = db_manager.get_notify_statuses()
             
@@ -38,7 +37,6 @@ class TaskAPIClient:
                 return []
             
             status_list = ", ".join([f'"{s}"' for s in statuses])
-            # ===== КОНЕЦ ИЗМЕНЕНИЯ =====
             
             api_endpoint = f"{self.base_url}/rest/api/2/search"
             
@@ -115,7 +113,6 @@ class TaskAPIClient:
         Использует статусы из БД
         """
         try:
-            # ===== ИЗМЕНЕНИЕ: статусы из БД =====
             import db_manager
             statuses = db_manager.get_task_statuses(active_only=True)
             status_names = [s['name'] for s in statuses if s['is_active']]
@@ -125,7 +122,6 @@ class TaskAPIClient:
                 return []
             
             status_list = ", ".join([f'"{s}"' for s in status_names])
-            # ===== КОНЕЦ ИЗМЕНЕНИЯ =====
             
             api_endpoint = f"{self.base_url}/rest/api/2/search"
             
@@ -284,7 +280,6 @@ class TaskAPIClient:
         if sla_data and isinstance(sla_data, dict):
             ongoing_cycle = sla_data.get('ongoingCycle')
             if ongoing_cycle:
-                # Берём REMAINING TIME вместо BREACH TIME!
                 remaining_time = ongoing_cycle.get('remainingTime', {})
                 remaining_text = remaining_time.get('friendly')
                 remaining_ms = remaining_time.get('millis', 0)
@@ -293,7 +288,6 @@ class TaskAPIClient:
                     due_date = datetime.now() + timedelta(milliseconds=remaining_ms)
                     return due_date, "customfield_10611 (SLA решение)", remaining_text
                 
-                # Если нет remainingTime, используем breachTime
                 breach_time = ongoing_cycle.get('breachTime', {})
                 if breach_time:
                     iso_date = breach_time.get('iso8601')
@@ -400,9 +394,7 @@ class TaskAPIClient:
             sla_data = fields.get('customfield_10611', {})
             completed_cycles = sla_data.get('completedCycles', [])
             
-            # Если есть завершённые циклы, значит задача переоткрывалась
             if completed_cycles and len(completed_cycles) > 0:
-                # Берём дату начала последнего цикла
                 last_cycle = completed_cycles[-1]
                 reopen_date = last_cycle.get('startTime', {}).get('iso8601')
                 if reopen_date:
@@ -414,76 +406,75 @@ class TaskAPIClient:
             logger.error(f"Ошибка получения истории для {issue_key}: {e}")
             return False, None
     
-async def get_task_by_key(self, task_key: str) -> Optional[Dict]:
-    """Получить задачу по ключу напрямую из API с полным парсингом"""
-    try:
-        url = f"{self.base_url}/rest/api/2/issue/{task_key}"
-        headers = {
-            "Authorization": f"Bearer {self.api_token}",
-            "Accept": "application/json",
-            "Host": "support.sbertroika.ru"
+    async def get_task_by_key(self, task_key: str) -> Optional[Dict]:
+        """Получить задачу по ключу напрямую из API с полным парсингом"""
+        try:
+            url = f"{self.base_url}/rest/api/2/issue/{task_key}"
+            headers = {
+                "Authorization": f"Bearer {self.api_token}",
+                "Accept": "application/json",
+                "Host": "support.sbertroika.ru"
+            }
+            
+            logger.info(f"🔍 Прямой запрос задачи {task_key}")
+            
+            connector = aiohttp.TCPConnector(family=socket.AF_INET)
+            
+            async with aiohttp.ClientSession(connector=connector) as session:
+                async with session.get(url, headers=headers) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        logger.info(f"✅ Задача {task_key} найдена")
+                        return self._parse_single_task(data)
+                    else:
+                        logger.error(f"❌ Ошибка получения задачи {task_key}: статус {response.status}")
+                        return None
+        except Exception as e:
+            logger.error(f"❌ Ошибка получения задачи {task_key}: {e}")
+            return None
+
+    def _parse_single_task(self, data: Dict) -> Dict:
+        """Парсит одну задачу для get_task_by_key"""
+        fields = data.get('fields', {})
+        
+        assignee_data = fields.get('assignee')
+        assignee = self._extract_assignee(assignee_data)
+        
+        due_date, sla_source, remaining_text = self._extract_sla_date(fields)
+        
+        if due_date and due_date.tzinfo is not None:
+            due_date = due_date.replace(tzinfo=None)
+        
+        now = datetime.now()
+        hours_until_due = 9999
+        if due_date:
+            hours_until_due = (due_date - now).total_seconds() / 3600
+        
+        task = {
+            'id': data.get('key'),
+            'key': data.get('key'),
+            'title': fields.get('summary', 'Без названия'),
+            'description': fields.get('description', ''),
+            'assignee': assignee,
+            'assignee_email': assignee_data.get('emailAddress') if assignee_data else None,
+            'assignee_username': assignee_data.get('name') if assignee_data else None,
+            'assignee_display': assignee_data.get('displayName') if assignee_data else None,
+            'due_date': due_date,
+            'due_date_source': sla_source,
+            'remaining_text': remaining_text,
+            'hours_until_due': hours_until_due,
+            'should_notify': False,
+            'created': fields.get('created'),
+            'updated': fields.get('updated'),
+            'status': fields.get('status', {}).get('name') if fields.get('status') else 'Неизвестно',
+            'status_id': fields.get('status', {}).get('id') if fields.get('status') else None,
+            'priority': fields.get('priority', {}).get('name') if fields.get('priority') else None,
+            'url': f"{self.base_url}/browse/{data.get('key')}",
+            'sla_raw': fields.get('customfield_10611'),
+            'raw_data': data
         }
         
-        logger.info(f"🔍 Прямой запрос задачи {task_key}")
-        
-        connector = aiohttp.TCPConnector(family=socket.AF_INET)
-        
-        async with aiohttp.ClientSession(connector=connector) as session:
-            async with session.get(url, headers=headers) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    logger.info(f"✅ Задача {task_key} найдена")
-                    # Парсим задачу через тот же метод, что и для списка
-                    return self._parse_single_task(data)
-                else:
-                    logger.error(f"❌ Ошибка получения задачи {task_key}: статус {response.status}")
-                    return None
-    except Exception as e:
-        logger.error(f"❌ Ошибка получения задачи {task_key}: {e}")
-        return None
-
-def _parse_single_task(self, data: Dict) -> Dict:
-    """Парсит одну задачу для get_task_by_key"""
-    fields = data.get('fields', {})
-    
-    assignee_data = fields.get('assignee')
-    assignee = self._extract_assignee(assignee_data)
-    
-    due_date, sla_source, remaining_text = self._extract_sla_date(fields)
-    
-    if due_date and due_date.tzinfo is not None:
-        due_date = due_date.replace(tzinfo=None)
-    
-    now = datetime.now()
-    hours_until_due = 9999
-    if due_date:
-        hours_until_due = (due_date - now).total_seconds() / 3600
-    
-    task = {
-        'id': data.get('key'),
-        'key': data.get('key'),
-        'title': fields.get('summary', 'Без названия'),
-        'description': fields.get('description', ''),
-        'assignee': assignee,
-        'assignee_email': assignee_data.get('emailAddress') if assignee_data else None,
-        'assignee_username': assignee_data.get('name') if assignee_data else None,
-        'assignee_display': assignee_data.get('displayName') if assignee_data else None,
-        'due_date': due_date,
-        'due_date_source': sla_source,
-        'remaining_text': remaining_text,
-        'hours_until_due': hours_until_due,
-        'should_notify': False,
-        'created': fields.get('created'),
-        'updated': fields.get('updated'),
-        'status': fields.get('status', {}).get('name') if fields.get('status') else 'Неизвестно',
-        'status_id': fields.get('status', {}).get('id') if fields.get('status') else None,
-        'priority': fields.get('priority', {}).get('name') if fields.get('priority') else None,
-        'url': f"{self.base_url}/browse/{data.get('key')}",
-        'sla_raw': fields.get('customfield_10611'),
-        'raw_data': data
-    }
-    
-    return task
+        return task
 
 
 # Для тестирования
