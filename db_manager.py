@@ -90,7 +90,7 @@ def init_db():
     
     c.execute('CREATE INDEX IF NOT EXISTS idx_error_status ON error_logs(status)')
     
-    # Таблица истории уведомлений
+    # Таблица истории уведомлений (с полем status)
     c.execute('''
         CREATE TABLE IF NOT EXISTS notification_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -102,6 +102,8 @@ def init_db():
             is_excel INTEGER DEFAULT 0,
             excel_data TEXT,
             excel_filename TEXT,
+            status TEXT DEFAULT 'sent',
+            error_text TEXT,
             is_deleted INTEGER DEFAULT 0
         )
     ''')
@@ -109,6 +111,7 @@ def init_db():
     c.execute('CREATE INDEX IF NOT EXISTS idx_hist_sent ON notification_history(sent_at)')
     c.execute('CREATE INDEX IF NOT EXISTS idx_hist_task_keys ON notification_history(task_keys_text)')
     c.execute('CREATE INDEX IF NOT EXISTS idx_hist_assignees ON notification_history(assignees_text)')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_hist_status ON notification_history(status)')
     
     # Добавляем настройки по умолчанию
     default_settings = {
@@ -560,7 +563,9 @@ def delete_done_errors() -> int:
 
 # ============ РАБОТА С ИСТОРИЕЙ УВЕДОМЛЕНИЙ ============
 
-def save_notification_history(message_text: str, tasks: List[Dict] = None, is_excel: bool = False, excel_data: str = None, excel_filename: str = None):
+def save_notification_history(message_text: str, tasks: List[Dict] = None, is_excel: bool = False, 
+                              excel_data: str = None, excel_filename: str = None, 
+                              status: str = 'sent', error_text: str = None):
     """Сохранить отправленное уведомление в историю"""
     conn = get_db_connection()
     c = conn.cursor()
@@ -570,7 +575,7 @@ def save_notification_history(message_text: str, tasks: List[Dict] = None, is_ex
     task_keys_text = ""
     
     if tasks:
-        task_keys = [t.get('id', '') for t in tasks]
+        task_keys = [t.get('id', '') for t in tasks if t.get('id')]
         task_keys_text = ", ".join(task_keys)
         
         assignees = []
@@ -580,21 +585,21 @@ def save_notification_history(message_text: str, tasks: List[Dict] = None, is_ex
                 assignees.append(assignee)
         assignees_text = ", ".join(assignees)
         
-        tasks_text = "\n".join([f"{t.get('id', '')}|{t.get('title', '')[:50]}|{t.get('assignee', '')}" for t in tasks])
+        tasks_text = "\n".join([f"{t.get('id', '')}|{t.get('title', '')[:50]}|{t.get('assignee', '')}" for t in tasks if t.get('id')])
     
     c.execute('''
         INSERT INTO notification_history 
-        (message_text, tasks_text, assignees_text, task_keys_text, is_excel, excel_data, excel_filename)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    ''', (message_text, tasks_text, assignees_text, task_keys_text, 1 if is_excel else 0, excel_data, excel_filename))
+        (message_text, tasks_text, assignees_text, task_keys_text, is_excel, excel_data, excel_filename, status, error_text)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (message_text, tasks_text, assignees_text, task_keys_text, 1 if is_excel else 0, excel_data, excel_filename, status, error_text))
     
     conn.commit()
     conn.close()
     return c.lastrowid
 
 
-def get_notification_history(limit: int = 100, search: str = None) -> List[Dict]:
-    """Получить историю уведомлений с поиском"""
+def get_notification_history(limit: int = 100, search: str = None, status_filter: str = 'all') -> List[Dict]:
+    """Получить историю уведомлений с поиском и фильтром по статусу"""
     conn = get_db_connection()
     c = conn.cursor()
     
@@ -604,6 +609,10 @@ def get_notification_history(limit: int = 100, search: str = None) -> List[Dict]
     '''
     params = []
     
+    if status_filter and status_filter != 'all':
+        query += ' AND status = ?'
+        params.append(status_filter)
+    
     if search and search.strip():
         search_term = f"%{search.strip()}%"
         query += ''' AND (
@@ -612,7 +621,7 @@ def get_notification_history(limit: int = 100, search: str = None) -> List[Dict]
             assignees_text LIKE ? OR 
             task_keys_text LIKE ?
         )'''
-        params = [search_term, search_term, search_term, search_term]
+        params.extend([search_term, search_term, search_term, search_term])
     
     query += ' ORDER BY sent_at DESC LIMIT ?'
     params.append(limit)
@@ -632,7 +641,9 @@ def get_notification_history(limit: int = 100, search: str = None) -> List[Dict]
             'sent_at': row['sent_at'],
             'is_excel': bool(row['is_excel']),
             'excel_data': row['excel_data'],
-            'excel_filename': row['excel_filename']
+            'excel_filename': row['excel_filename'],
+            'status': row['status'] if 'status' in row.keys() else 'sent',
+            'error_text': row['error_text'] if 'error_text' in row.keys() else None
         })
     
     return history
@@ -656,9 +667,20 @@ def get_notification_by_id(notification_id: int) -> Optional[Dict]:
             'sent_at': row['sent_at'],
             'is_excel': bool(row['is_excel']),
             'excel_data': row['excel_data'],
-            'excel_filename': row['excel_filename']
+            'excel_filename': row['excel_filename'],
+            'status': row['status'] if 'status' in row.keys() else 'sent',
+            'error_text': row['error_text'] if 'error_text' in row.keys() else None
         }
     return None
+
+
+def update_notification_status(notification_id: int, status: str):
+    """Обновить статус уведомления"""
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute('UPDATE notification_history SET status = ? WHERE id = ?', (status, notification_id))
+    conn.commit()
+    conn.close()
 
 
 def delete_notification_history(notification_id: int):
@@ -671,13 +693,15 @@ def delete_notification_history(notification_id: int):
 
 
 def clear_old_notifications(days: int = 30):
-    """Очистить уведомления старше N дней"""
+    """Очистить уведомления старше N дней (только отправленные)"""
     conn = get_db_connection()
     c = conn.cursor()
     c.execute('''
         UPDATE notification_history 
         SET is_deleted = 1 
-        WHERE sent_at < datetime("now", ?) AND is_deleted = 0
+        WHERE sent_at < datetime("now", ?) 
+        AND is_deleted = 0
+        AND status IN ('sent', 'manual', 'resent')
     ''', (f"-{days} days",))
     deleted = c.rowcount
     conn.commit()
@@ -696,5 +720,32 @@ def get_notification_stats() -> Dict:
     c.execute('SELECT COUNT(*) as excel FROM notification_history WHERE is_deleted = 0 AND is_excel = 1')
     excel = c.fetchone()['excel']
     
+    c.execute('SELECT COUNT(*) as pending FROM notification_history WHERE is_deleted = 0 AND status = "pending"')
+    pending = c.fetchone()['pending']
+    
     conn.close()
-    return {'total': total, 'excel': excel, 'text': total - excel}
+    return {'total': total, 'excel': excel, 'text': total - excel, 'pending': pending}
+
+
+def get_sent_task_keys_from_history() -> set:
+    """Получить все ID задач, которые уже были отправлены (из истории)"""
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute('''
+        SELECT task_keys_text FROM notification_history 
+        WHERE is_deleted = 0 
+        AND status IN ('sent', 'manual', 'resent')
+        AND task_keys_text IS NOT NULL
+        AND task_keys_text != ''
+    ''')
+    rows = c.fetchall()
+    conn.close()
+    
+    sent_keys = set()
+    for row in rows:
+        keys = row['task_keys_text'].split(', ')
+        for key in keys:
+            if key.strip():
+                sent_keys.add(key.strip())
+    
+    return sent_keys
