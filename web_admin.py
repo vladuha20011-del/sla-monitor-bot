@@ -407,6 +407,7 @@ def api_send_notification():
         if not task_key:
             return jsonify({'error': 'Не указан номер задачи'}), 400
         
+        # Получаем задачу синхронно через asyncio.run
         async def get_task():
             client = TaskAPIClient()
             return await client.get_task_by_key(task_key)
@@ -456,10 +457,12 @@ def api_send_notification():
         else:
             message += "Просьба обратить внимание на задачу."
         
+        # Отправляем сообщение синхронно
         bot = Bot(token=config.BOT_TOKEN)
         chat_id = config.CHAT_ID
         
-        await bot.send_message(chat_id=chat_id, text=message)
+        # Используем синхронный метод send_message
+        bot.send_message(chat_id=chat_id, text=message)
         
         return jsonify({'status': 'ok', 'message': '✅ Уведомление отправлено'})
         
