@@ -650,6 +650,13 @@
             <div style="display: flex; gap: 10px; margin: 15px 0; flex-wrap: wrap; align-items: center;">
                 <input type="text" id="historySearchInput" placeholder="🔍 Поиск по тексту, задаче или исполнителю..." 
                        style="flex:1; min-width: 200px; padding: 8px 14px; background: #0f0f1a; border: 1px solid #2a2a3e; border-radius: 6px; color: #e0e0e0;">
+                <select id="historyStatusFilter" onchange="loadHistory()" style="padding: 8px 14px; background: #0f0f1a; border: 1px solid #2a2a3e; border-radius: 6px; color: #e0e0e0;">
+                    <option value="all">📋 Все статусы</option>
+                    <option value="sent">✅ Отправленные</option>
+                    <option value="pending">⏳ Черновики</option>
+                    <option value="manual">👤 Вручную</option>
+                    <option value="resent">🔄 Переотправленные</option>
+                </select>
                 <button class="btn btn-primary btn-sm" onclick="loadHistory()">🔍 Найти</button>
                 <button class="btn btn-primary btn-sm" onclick="loadHistory()">🔄 Обновить</button>
                 <span id="historyStats" style="color: #888; font-size: 14px;"></span>
@@ -717,6 +724,10 @@
                 <div class="stat-card">
                     <div class="number" id="stat_history_count">-</div>
                     <div class="label">📋 Записей в истории</div>
+                </div>
+                <div class="stat-card">
+                    <div class="number" id="stat_pending_count">-</div>
+                    <div class="label">⏳ Черновиков</div>
                 </div>
                 <div class="stat-card">
                     <div class="number" id="stat_active_errors">-</div>
@@ -1281,12 +1292,13 @@
         // ============ ИСТОРИЯ ============
         function loadHistory() {
             const search = document.getElementById('historySearchInput')?.value || '';
+            const statusFilter = document.getElementById('historyStatusFilter')?.value || 'all';
             const container = document.getElementById('historyContainer');
             const stats = document.getElementById('historyStats');
             
             container.innerHTML = '<p style="color: #888;">⏳ Загрузка...</p>';
             
-            fetch('/api/notification-history?limit=50&search=' + encodeURIComponent(search))
+            fetch('/api/notification-history?limit=50&search=' + encodeURIComponent(search) + '&status=' + encodeURIComponent(statusFilter))
                 .then(r => r.json())
                 .then(data => {
                     if (data.length === 0) {
@@ -1305,27 +1317,50 @@
                         const assignees = record.assignees_text || '—';
                         const tasksCount = record.tasks_text ? record.tasks_text.split('\n').length : 0;
                         
+                        // Статус
+                        const statusMap = {
+                            'sent': { label: '✅ Отправлено', color: '#00c853' },
+                            'pending': { label: '⏳ ЧЕРНОВИК', color: '#ff9100' },
+                            'manual': { label: '👤 Вручную', color: '#2979ff' },
+                            'resent': { label: '🔄 Переотправлено', color: '#7b2ffc' }
+                        };
+                        const status = statusMap[record.status] || statusMap['sent'];
+                        
                         let previewText = record.message_text;
                         if (previewText.length > 300) {
                             previewText = previewText.substring(0, 300) + '...';
                         }
                         
+                        // Кнопки в зависимости от статуса
+                        let actionButtons = '';
+                        if (record.status === 'pending') {
+                            actionButtons = `
+                                <button class="btn btn-success btn-sm" onclick="sendPendingNotification(${record.id})">📨 Отправить сейчас</button>
+                                <button class="btn btn-danger btn-sm" onclick="deleteHistoryRecord(${record.id})">🗑️</button>
+                            `;
+                        } else {
+                            actionButtons = `
+                                <button class="btn btn-success btn-sm" onclick="resendNotification(${record.id})">🔄 Отправить повторно</button>
+                                <button class="btn btn-danger btn-sm" onclick="deleteHistoryRecord(${record.id})">🗑️</button>
+                            `;
+                        }
+                        
                         html += `
-                            <div style="background: #0f0f1a; border: 1px solid #2a2a3e; border-radius: 8px; padding: 16px; margin-bottom: 12px;">
+                            <div style="background: #0f0f1a; border: 1px solid ${record.status === 'pending' ? '#ff9100' : '#2a2a3e'}; border-radius: 8px; padding: 16px; margin-bottom: 12px;">
                                 <div style="display: flex; justify-content: space-between; align-items: start; flex-wrap: wrap; gap: 8px; margin-bottom: 8px;">
                                     <div>
                                         <span style="color: #888; font-size: 12px;">🕐 ${sentDate}</span>
-                                        <span style="margin-left: 12px; font-size: 13px; color: #00d4ff;">${typeLabel}</span>
+                                        <span style="margin-left: 12px; font-size: 13px; color: ${status.color}; font-weight: 600;">${status.label}</span>
                                         <span style="margin-left: 12px; font-size: 13px; color: #888;">📌 ${tasksCount} задач</span>
                                     </div>
                                     <div style="display: flex; gap: 8px;">
-                                        <button class="btn btn-success btn-sm" onclick="resendNotification(${record.id})">🔄 Отправить повторно</button>
-                                        <button class="btn btn-danger btn-sm" onclick="deleteHistoryRecord(${record.id})">🗑️</button>
+                                        ${actionButtons}
                                     </div>
                                 </div>
                                 <div style="font-size: 12px; color: #666; margin-bottom: 8px;">
                                     👤 Исполнители: ${assignees}
                                     ${isExcel ? ` | 📎 ${record.excel_filename || 'Excel-файл'}` : ''}
+                                    ${record.error_text ? ` | ❌ Ошибка: ${record.error_text.substring(0, 50)}` : ''}
                                 </div>
                                 <details style="margin-top: 8px;">
                                     <summary style="cursor: pointer; color: #00d4ff; font-size: 13px;">📝 Показать текст сообщения</summary>
@@ -1344,6 +1379,24 @@
                 });
         }
 
+        function sendPendingNotification(id) {
+            if (!confirm('Отправить этот черновик?')) return;
+            
+            fetch('/api/notification-history/' + id + '/send-pending', {
+                method: 'POST'
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.status === 'ok') {
+                    showToast(data.message, 'success');
+                    loadHistory();
+                } else {
+                    showToast('❌ ' + (data.error || 'Ошибка'), 'error');
+                }
+            })
+            .catch(() => showToast('❌ Ошибка отправки черновика', 'error'));
+        }
+
         function resendNotification(id) {
             if (!confirm('Отправить это уведомление повторно?')) return;
             
@@ -1354,6 +1407,7 @@
             .then(data => {
                 if (data.status === 'ok') {
                     showToast(data.message, 'success');
+                    loadHistory();
                 } else {
                     showToast('❌ ' + (data.error || 'Ошибка'), 'error');
                 }
@@ -1502,6 +1556,7 @@
                     document.getElementById('stat_checks').textContent = data.checks || 0;
                     document.getElementById('stat_notifications').textContent = data.notifications || 0;
                     document.getElementById('stat_history_count').textContent = data.history_count || 0;
+                    document.getElementById('stat_pending_count').textContent = data.pending_count || 0;
                     document.getElementById('stat_active_errors').textContent = data.active_errors || 0;
                     
                     const botStatus = data.bot_running ? '🟢 Работает' : '🔴 Остановлен';
