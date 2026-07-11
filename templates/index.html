@@ -477,10 +477,6 @@
         <header>
             <h1>🤖 SLA Бот — Панель управления</h1>
             <div class="header-right">
-                <div class="ping-status" id="pingStatus">
-                    <span class="dot yellow" id="pingDot"></span>
-                    <span id="pingText">Проверка...</span>
-                </div>
                 <div class="status">
                     <span class="status-dot online" id="statusDot"></span>
                     <span id="statusText">Бот работает</span>
@@ -788,8 +784,6 @@
             setupTabs();
             setupForms();
             updateStatus();
-            updatePing();
-            setInterval(updateStatus, 30000);
             setInterval(updatePing, 30000);
         });
 
