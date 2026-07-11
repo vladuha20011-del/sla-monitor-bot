@@ -26,13 +26,25 @@ class TaskAPIClient:
     async def get_tasks(self, max_results: int = 500) -> List[Dict[str, Any]]:
         """
         Получает список активных задач из Jira с приближающимся SLA
+        Использует статусы из БД (notify_enabled = 1)
         """
         try:
+            # ===== ИЗМЕНЕНИЕ: статусы из БД =====
+            import db_manager
+            statuses = db_manager.get_notify_statuses()
+            
+            if not statuses:
+                logger.warning("⚠️ Нет статусов с уведомлениями в БД")
+                return []
+            
+            status_list = ", ".join([f'"{s}"' for s in statuses])
+            # ===== КОНЕЦ ИЗМЕНЕНИЯ =====
+            
             api_endpoint = f"{self.base_url}/rest/api/2/search"
             
             jql_query = f'''
             project = ZZ 
-            AND status IN ("Ожидание поддержки", "В процессе", "Передано партнеру")
+            AND status IN ({status_list})
             ORDER BY created DESC
             '''
             
@@ -100,38 +112,27 @@ class TaskAPIClient:
     async def get_all_tasks_by_user(self, username: str, max_results: int = 500) -> List[Dict[str, Any]]:
         """
         Получает ВСЕ задачи (только активные статусы) по username исполнителя
+        Использует статусы из БД
         """
         try:
+            # ===== ИЗМЕНЕНИЕ: статусы из БД =====
+            import db_manager
+            statuses = db_manager.get_task_statuses(active_only=True)
+            status_names = [s['name'] for s in statuses if s['is_active']]
+            
+            if not status_names:
+                logger.warning(f"⚠️ Нет активных статусов в БД для пользователя {username}")
+                return []
+            
+            status_list = ", ".join([f'"{s}"' for s in status_names])
+            # ===== КОНЕЦ ИЗМЕНЕНИЯ =====
+            
             api_endpoint = f"{self.base_url}/rest/api/2/search"
             
-            # Список активных статусов
-            active_statuses = [
-                "Ожидание поддержки",
-                "Ожидание клиента",
-                "Передано партнеру",
-                "В процессе",
-                "Эскалация (не разработка)",
-                "Фин блок",
-                "Согласование",
-                "ЗАПРОС НА ПАУЗУ",
-                "ETL",
-                "РЕГ БЛОК",
-                "Претензионный",
-                "ЮР БЛОК",
-                "ВНЕДРЕНИЕ",
-                "РЕКА",
-                "В разработку",
-                "Пауза"
-            ]
-            
-            # Формируем строку статусов для JQL
-            statuses_str = ', '.join([f'"{s}"' for s in active_statuses])
-            
-            # JQL запрос для поиска задач по исполнителю и статусам
             jql_query = f'''
             project = ZZ 
             AND assignee = "{username}"
-            AND status IN ({statuses_str})
+            AND status IN ({status_list})
             ORDER BY created DESC
             '''
             
