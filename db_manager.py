@@ -37,7 +37,7 @@ def init_db():
     try:
         c.execute('ALTER TABLE employees ADD COLUMN status TEXT DEFAULT "active"')
     except sqlite3.OperationalError:
-        pass  # колонка уже существует
+        pass
     
     # Таблица настроек
     c.execute('''
@@ -77,6 +77,20 @@ def init_db():
         )
     ''')
     
+    # Таблица ошибок со статусами
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS error_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT,
+            message TEXT,
+            solution TEXT,
+            status TEXT DEFAULT 'new',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    c.execute('CREATE INDEX IF NOT EXISTS idx_error_status ON error_logs(status)')
+    
     # Добавляем настройки по умолчанию
     default_settings = {
         'SLA_HOURS': ('24', 'За сколько часов до дедлайна уведомлять'),
@@ -94,7 +108,7 @@ def init_db():
         c.execute('INSERT OR IGNORE INTO settings (key, value, description) VALUES (?, ?, ?)', 
                   (key, value, desc))
     
-    # Добавляем статусы по умолчанию (с уведомлениями)
+    # Добавляем статусы по умолчанию
     default_statuses = [
         ('Ожидание поддержки', 1),
         ('В процессе', 1),
@@ -240,16 +254,13 @@ def get_employee_by_name(name_text: str) -> Optional[Dict]:
     name_text_lower = name_text.lower().strip()
     
     for employee in employees:
-        # Полное совпадение
         if employee['full_name'].lower() == name_text_lower:
             return employee
         
-        # По ключевым словам
         search_names = [s.lower() for s in employee['search_names']]
         if all(keyword in name_text_lower for keyword in search_names):
             return employee
         
-        # Частичное совпадение
         name_words = employee['full_name'].lower().split()
         search_words = name_text_lower.split()
         if all(any(word in nw for nw in name_words) for word in search_words):
@@ -453,6 +464,79 @@ def save_templates(data: Dict[str, str]):
     
     conn.commit()
     conn.close()
+
+
+# ============ СТАТИСТИКА ============
+
+def increment_stats(key: str):
+    """Увеличить статистику"""
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute('''
+        INSERT INTO stats (key, value) VALUES (?, 1)
+        ON CONFLICT(key) DO UPDATE SET value = value + 1
+    ''', (key,))
+    conn.commit()
+    conn.close()
+
+def get_stats() -> Dict[str, int]:
+    """Получить статистику"""
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute('SELECT key, value FROM stats')
+    rows = c.fetchall()
+    conn.close()
+    
+    return {row['key']: row['value'] for row in rows}
+
+
+# ============ РАБОТА С ОШИБКАМИ ============
+
+def save_error_log(timestamp: str, message: str, solution: str):
+    """Сохранить ошибку в БД"""
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute('''
+        INSERT INTO error_logs (timestamp, message, solution, status)
+        VALUES (?, ?, ?, 'new')
+    ''', (timestamp, message, solution))
+    conn.commit()
+    conn.close()
+
+def get_error_logs(status_filter: str = 'active') -> List[Dict]:
+    """Получить ошибки с фильтром по статусу"""
+    conn = get_db_connection()
+    c = conn.cursor()
+    
+    if status_filter == 'active':
+        c.execute('SELECT * FROM error_logs WHERE status != "done" ORDER BY id DESC LIMIT 100')
+    elif status_filter == 'all':
+        c.execute('SELECT * FROM error_logs ORDER BY id DESC LIMIT 100')
+    else:
+        c.execute('SELECT * FROM error_logs WHERE status = ? ORDER BY id DESC LIMIT 100', (status_filter,))
+    
+    rows = c.fetchall()
+    conn.close()
+    
+    return [{'id': row['id'], 'timestamp': row['timestamp'], 'message': row['message'], 'solution': row['solution'], 'status': row['status']} for row in rows]
+
+def update_error_status(error_id: int, status: str):
+    """Обновить статус ошибки"""
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute('UPDATE error_logs SET status = ? WHERE id = ?', (status, error_id))
+    conn.commit()
+    conn.close()
+
+def delete_done_errors() -> int:
+    """Удалить выполненные ошибки"""
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute('DELETE FROM error_logs WHERE status = "done"')
+    deleted = c.rowcount
+    conn.commit()
+    conn.close()
+    return deleted
 
 
 # ============ СТАТИСТИКА ============
