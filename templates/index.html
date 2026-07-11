@@ -239,7 +239,7 @@
         
         .stats-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
             gap: 15px;
             margin-bottom: 20px;
         }
@@ -496,6 +496,7 @@
             <button class="tab-btn" data-tab="statuses">📊 Статусы</button>
             <button class="tab-btn" data-tab="templates">📝 Шаблоны</button>
             <button class="tab-btn" data-tab="notifications">📨 Уведомления</button>
+            <button class="tab-btn" data-tab="history">📨 История</button>
             <button class="tab-btn" data-tab="errors">📋 Ошибки</button>
             <button class="tab-btn" data-tab="logs">📄 Логи</button>
             <button class="tab-btn" data-tab="system">🔧 Система</button>
@@ -639,6 +640,26 @@
             <div id="notificationResult" style="margin-top: 15px; display: none;"></div>
         </div>
 
+        <!-- ==================== ИСТОРИЯ ==================== -->
+        <div class="tab-content" id="tab-history">
+            <div class="flex-between">
+                <h2>📨 История уведомлений</h2>
+                <button class="btn btn-danger btn-sm" onclick="clearHistory()">🗑️ Очистить старше 30 дней</button>
+            </div>
+            
+            <div style="display: flex; gap: 10px; margin: 15px 0; flex-wrap: wrap; align-items: center;">
+                <input type="text" id="historySearchInput" placeholder="🔍 Поиск по тексту, задаче или исполнителю..." 
+                       style="flex:1; min-width: 200px; padding: 8px 14px; background: #0f0f1a; border: 1px solid #2a2a3e; border-radius: 6px; color: #e0e0e0;">
+                <button class="btn btn-primary btn-sm" onclick="loadHistory()">🔍 Найти</button>
+                <button class="btn btn-primary btn-sm" onclick="loadHistory()">🔄 Обновить</button>
+                <span id="historyStats" style="color: #888; font-size: 14px;"></span>
+            </div>
+            
+            <div id="historyContainer">
+                <p style="color: #888;">Загрузка...</p>
+            </div>
+        </div>
+
         <!-- ==================== ОШИБКИ ==================== -->
         <div class="tab-content" id="tab-errors">
             <div class="flex-between">
@@ -682,24 +703,28 @@
             <h3>📊 Статистика</h3>
             <div class="stats-grid" id="statsGrid">
                 <div class="stat-card">
-                    <div class="number" id="stat_total_tasks">-</div>
-                    <div class="label">Всего задач</div>
-                </div>
-                <div class="stat-card">
-                    <div class="number" id="stat_urgent_tasks">-</div>
-                    <div class="label">Требуют уведомления</div>
-                </div>
-                <div class="stat-card">
                     <div class="number" id="stat_employees_count">-</div>
-                    <div class="label">Сотрудников</div>
+                    <div class="label">👥 Сотрудников</div>
                 </div>
                 <div class="stat-card">
                     <div class="number" id="stat_checks">-</div>
-                    <div class="label">Проверок выполнено</div>
+                    <div class="label">🔄 Проверок выполнено</div>
                 </div>
                 <div class="stat-card">
                     <div class="number" id="stat_notifications">-</div>
-                    <div class="label">Уведомлений отправлено</div>
+                    <div class="label">📨 Уведомлений отправлено</div>
+                </div>
+                <div class="stat-card">
+                    <div class="number" id="stat_history_count">-</div>
+                    <div class="label">📋 Записей в истории</div>
+                </div>
+                <div class="stat-card">
+                    <div class="number" id="stat_active_errors">-</div>
+                    <div class="label">⚠️ Активных ошибок</div>
+                </div>
+                <div class="stat-card">
+                    <div class="number" id="stat_bot_status">-</div>
+                    <div class="label">🤖 Статус бота</div>
                 </div>
             </div>
             
@@ -793,6 +818,7 @@
             loadSettings();
             loadStatuses();
             loadTemplates();
+            loadHistory();
             loadErrorLogs();
             loadLogs();
             loadStats();
@@ -821,6 +847,9 @@
                     }
                     if (this.dataset.tab === 'logs') {
                         loadLogs();
+                    }
+                    if (this.dataset.tab === 'history') {
+                        loadHistory();
                     }
                 });
             });
@@ -1249,6 +1278,123 @@
             }
         });
 
+        // ============ ИСТОРИЯ ============
+        function loadHistory() {
+            const search = document.getElementById('historySearchInput')?.value || '';
+            const container = document.getElementById('historyContainer');
+            const stats = document.getElementById('historyStats');
+            
+            container.innerHTML = '<p style="color: #888;">⏳ Загрузка...</p>';
+            
+            fetch('/api/notification-history?limit=50&search=' + encodeURIComponent(search))
+                .then(r => r.json())
+                .then(data => {
+                    if (data.length === 0) {
+                        container.innerHTML = '<div style="text-align:center; padding:40px; color:#666;">📭 История пуста</div>';
+                        stats.textContent = '';
+                        return;
+                    }
+                    
+                    stats.textContent = `📊 Всего: ${data.length}`;
+                    
+                    let html = '';
+                    data.forEach(record => {
+                        const sentDate = new Date(record.sent_at).toLocaleString('ru-RU');
+                        const isExcel = record.is_excel;
+                        const typeLabel = isExcel ? '📊 Excel-отчёт' : '📄 Текстовое сообщение';
+                        const assignees = record.assignees_text || '—';
+                        const tasksCount = record.tasks_text ? record.tasks_text.split('\n').length : 0;
+                        
+                        let previewText = record.message_text;
+                        if (previewText.length > 300) {
+                            previewText = previewText.substring(0, 300) + '...';
+                        }
+                        
+                        html += `
+                            <div style="background: #0f0f1a; border: 1px solid #2a2a3e; border-radius: 8px; padding: 16px; margin-bottom: 12px;">
+                                <div style="display: flex; justify-content: space-between; align-items: start; flex-wrap: wrap; gap: 8px; margin-bottom: 8px;">
+                                    <div>
+                                        <span style="color: #888; font-size: 12px;">🕐 ${sentDate}</span>
+                                        <span style="margin-left: 12px; font-size: 13px; color: #00d4ff;">${typeLabel}</span>
+                                        <span style="margin-left: 12px; font-size: 13px; color: #888;">📌 ${tasksCount} задач</span>
+                                    </div>
+                                    <div style="display: flex; gap: 8px;">
+                                        <button class="btn btn-success btn-sm" onclick="resendNotification(${record.id})">🔄 Отправить повторно</button>
+                                        <button class="btn btn-danger btn-sm" onclick="deleteHistoryRecord(${record.id})">🗑️</button>
+                                    </div>
+                                </div>
+                                <div style="font-size: 12px; color: #666; margin-bottom: 8px;">
+                                    👤 Исполнители: ${assignees}
+                                    ${isExcel ? ` | 📎 ${record.excel_filename || 'Excel-файл'}` : ''}
+                                </div>
+                                <details style="margin-top: 8px;">
+                                    <summary style="cursor: pointer; color: #00d4ff; font-size: 13px;">📝 Показать текст сообщения</summary>
+                                    <div style="background: #0a0a14; padding: 12px; border-radius: 6px; margin-top: 8px; border: 1px solid #1a1a2e; font-family: monospace; font-size: 13px; white-space: pre-wrap; max-height: 400px; overflow-y: auto; color: #ccc;">
+                                        ${record.message_text}
+                                    </div>
+                                </details>
+                            </div>
+                        `;
+                    });
+                    
+                    container.innerHTML = html;
+                })
+                .catch(() => {
+                    container.innerHTML = '<p style="color:#ff4444;">❌ Ошибка загрузки истории</p>';
+                });
+        }
+
+        function resendNotification(id) {
+            if (!confirm('Отправить это уведомление повторно?')) return;
+            
+            fetch('/api/notification-history/' + id + '/resend', {
+                method: 'POST'
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.status === 'ok') {
+                    showToast(data.message, 'success');
+                } else {
+                    showToast('❌ ' + (data.error || 'Ошибка'), 'error');
+                }
+            })
+            .catch(() => showToast('❌ Ошибка переотправки', 'error'));
+        }
+
+        function deleteHistoryRecord(id) {
+            if (!confirm('Удалить эту запись из истории?')) return;
+            
+            fetch('/api/notification-history/' + id, {
+                method: 'DELETE'
+            })
+            .then(r => r.json())
+            .then(data => {
+                showToast(data.message || '✅ Удалено', 'success');
+                loadHistory();
+            })
+            .catch(() => showToast('❌ Ошибка удаления', 'error'));
+        }
+
+        function clearHistory() {
+            const days = prompt('Удалить записи старше скольких дней? (по умолчанию 30):', '30');
+            if (days === null) return;
+            const daysNum = parseInt(days) || 30;
+            
+            if (!confirm(`Удалить все записи старше ${daysNum} дней?`)) return;
+            
+            fetch('/api/notification-history/clear', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ days: daysNum })
+            })
+            .then(r => r.json())
+            .then(data => {
+                showToast(data.message || '✅ Очищено', 'success');
+                loadHistory();
+            })
+            .catch(() => showToast('❌ Ошибка очистки', 'error'));
+        }
+
         // ============ ОШИБКИ ============
         function loadErrorLogs() {
             const statusFilter = document.getElementById('errorStatusFilter')?.value || 'active';
@@ -1352,11 +1498,14 @@
             fetch('/api/stats')
                 .then(r => r.json())
                 .then(data => {
-                    document.getElementById('stat_total_tasks').textContent = data.total_tasks || 0;
-                    document.getElementById('stat_urgent_tasks').textContent = data.urgent_tasks || 0;
                     document.getElementById('stat_employees_count').textContent = data.employees_count || 0;
                     document.getElementById('stat_checks').textContent = data.checks || 0;
                     document.getElementById('stat_notifications').textContent = data.notifications || 0;
+                    document.getElementById('stat_history_count').textContent = data.history_count || 0;
+                    document.getElementById('stat_active_errors').textContent = data.active_errors || 0;
+                    
+                    const botStatus = data.bot_running ? '🟢 Работает' : '🔴 Остановлен';
+                    document.getElementById('stat_bot_status').textContent = botStatus;
                 })
                 .catch(() => {});
         }
