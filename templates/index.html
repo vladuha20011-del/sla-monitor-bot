@@ -477,6 +477,10 @@
         <header>
             <h1>🤖 SLA Бот — Панель управления</h1>
             <div class="header-right">
+                <div class="ping-status" id="pingStatus">
+                    <span class="dot yellow" id="pingDot"></span>
+                    <span id="pingText">Проверка...</span>
+                </div>
                 <div class="status">
                     <span class="status-dot online" id="statusDot"></span>
                     <span id="statusText">Бот работает</span>
@@ -641,6 +645,17 @@
                 <h2>📋 Лог ошибок (с расшифровкой)</h2>
                 <button class="btn btn-primary btn-sm" onclick="loadErrorLogs()">🔄 Обновить</button>
             </div>
+            
+            <div style="display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap; align-items: center;">
+                <label style="color: #aaa; font-size: 14px;">Показывать:</label>
+                <select id="errorStatusFilter" onchange="loadErrorLogs()" style="padding: 6px 12px; background: #0f0f1a; border: 1px solid #2a2a3e; border-radius: 6px; color: #e0e0e0;">
+                    <option value="active">🟡 Активные (новые + в процессе)</option>
+                    <option value="all">📋 Все</option>
+                    <option value="done">🟢 Только выполненные</option>
+                </select>
+                <button class="btn btn-danger btn-sm" onclick="clearDoneErrors()">🗑️ Удалить выполненные</button>
+            </div>
+            
             <div id="errorLogsContainer">
                 <p style="color: #888;">Загрузка ошибок...</p>
             </div>
@@ -784,6 +799,8 @@
             setupTabs();
             setupForms();
             updateStatus();
+            updatePing();
+            setInterval(updateStatus, 30000);
             setInterval(updatePing, 30000);
         });
 
@@ -1132,7 +1149,6 @@
                     const dueDate = task.due_date ? new Date(task.due_date).toLocaleString('ru-RU') : 'не указан';
                     const assigneeDisplay = task.assignee_display || task.assignee;
                     
-                    // Ищем сотрудника в БД для получения тега
                     fetch('/api/employees')
                         .then(r => r.json())
                         .then(employees => {
@@ -1222,7 +1238,6 @@
             }, 10000);
         }
 
-        // Вход по Enter в поле поиска
         document.addEventListener('DOMContentLoaded', function() {
             const input = document.getElementById('taskSearchInput');
             if (input) {
@@ -1236,21 +1251,37 @@
 
         // ============ ОШИБКИ ============
         function loadErrorLogs() {
-            fetch('/api/error-logs')
+            const statusFilter = document.getElementById('errorStatusFilter')?.value || 'active';
+            
+            fetch('/api/error-logs?status=' + statusFilter)
                 .then(r => r.json())
                 .then(data => {
                     if (data.length === 0) {
                         document.getElementById('errorLogsContainer').innerHTML = 
-                            '<div class="no-errors">✅ Ошибок не найдено. Бот работает стабильно!</div>';
+                            '<div class="no-errors">✅ Нет активных ошибок</div>';
                         return;
                     }
                     let html = '';
                     data.forEach(err => {
+                        const statusMap = {
+                            'new': '🟡 Новая',
+                            'in_progress': '🔵 В процессе',
+                            'done': '🟢 Выполнено'
+                        };
+                        const statusLabel = statusMap[err.status] || err.status;
                         html += `
                             <div class="error-item">
                                 <div class="timestamp">🕐 ${err.timestamp || 'Время неизвестно'}</div>
                                 <div class="message">${err.message}</div>
-                                <div class="solution">${err.solution}</div>
+                                <div class="solution">💡 ${err.solution}</div>
+                                <div style="margin-top: 8px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                                    <select onchange="updateErrorStatus(${err.id}, this.value)" style="padding: 4px 10px; background: #0f0f1a; border: 1px solid #2a2a3e; border-radius: 6px; color: #e0e0e0;">
+                                        <option value="new" ${err.status === 'new' ? 'selected' : ''}>🟡 Новая</option>
+                                        <option value="in_progress" ${err.status === 'in_progress' ? 'selected' : ''}>🔵 В процессе</option>
+                                        <option value="done" ${err.status === 'done' ? 'selected' : ''}>🟢 Выполнено</option>
+                                    </select>
+                                    <span style="font-size: 12px; color: #666;">${statusLabel}</span>
+                                </div>
                             </div>
                         `;
                     });
@@ -1260,6 +1291,33 @@
                     document.getElementById('errorLogsContainer').innerHTML = 
                         '<p style="color:#ff4444;">❌ Ошибка загрузки лога ошибок</p>';
                 });
+        }
+
+        function updateErrorStatus(id, status) {
+            fetch('/api/error-logs/' + id + '/status', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status: status })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.status === 'ok') {
+                    showToast('✅ Статус обновлён', 'success');
+                    loadErrorLogs();
+                }
+            })
+            .catch(() => showToast('❌ Ошибка обновления статуса', 'error'));
+        }
+
+        function clearDoneErrors() {
+            if (!confirm('Удалить все выполненные ошибки?')) return;
+            fetch('/api/error-logs/clear-done', { method: 'DELETE' })
+                .then(r => r.json())
+                .then(data => {
+                    showToast(data.message, 'success');
+                    loadErrorLogs();
+                })
+                .catch(() => showToast('❌ Ошибка удаления', 'error'));
         }
 
         // ============ ЛОГИ ============
