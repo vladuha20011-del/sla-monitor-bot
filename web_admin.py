@@ -311,7 +311,7 @@ def api_bot_ping():
 
 @app.route('/api/task/<task_key>')
 def api_get_task(task_key):
-    """Получить информацию о задаче по ключу"""
+    """Получить информацию о задаче по ключу (с Jira)"""
     try:
         import asyncio
         from api_client import TaskAPIClient
@@ -323,11 +323,25 @@ def api_get_task(task_key):
         task = asyncio.run(get_task())
         
         if task:
+            # Форматируем дату для отображения
+            if task.get('due_date'):
+                task['due_date'] = task['due_date'].isoformat() if hasattr(task['due_date'], 'isoformat') else str(task['due_date'])
+            
+            # Добавляем created_formatted если есть
+            if task.get('created'):
+                try:
+                    from datetime import datetime
+                    created = datetime.fromisoformat(task['created'].replace('Z', '+00:00'))
+                    task['created_formatted'] = created.strftime('%d.%m.%Y %H:%M')
+                except:
+                    task['created_formatted'] = str(task['created'])[:16]
+            
             return jsonify(task)
         else:
             return jsonify({'error': 'Задача не найдена'}), 404
             
     except Exception as e:
+        logger.error(f"❌ Ошибка получения задачи: {e}")
         return jsonify({'error': str(e)}), 500
 
 
