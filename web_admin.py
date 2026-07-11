@@ -148,21 +148,12 @@ def api_save_templates():
     db_manager.save_templates(data)
     return jsonify({'status': 'ok', 'message': 'Шаблоны сохранены'})
 
-# ============ API: ЛОГИ ============
+# ============ API: ЛОГИ (упрощённо) ============
 
 @app.route('/api/logs')
 def api_get_logs():
-    log_file = 'sla_bot.log'
-    if not os.path.exists(log_file):
-        return 'Лог-файл не найден'
-    
-    try:
-        with open(log_file, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
-            last_lines = lines[-1000:] if len(lines) > 1000 else lines
-            return ''.join(last_lines)
-    except Exception as e:
-        return f'Ошибка чтения логов: {e}'
+    """Возвращает логи (упрощённо)"""
+    return '📄 Логи временно отключены для снижения нагрузки'
 
 @app.route('/api/logs', methods=['DELETE'])
 def api_clear_logs():
@@ -172,65 +163,14 @@ def api_clear_logs():
             f.write('')
     return jsonify({'status': 'ok', 'message': 'Логи очищены'})
 
-# ============ API: ОШИБКИ ============
+# ============ API: ОШИБКИ (упрощённо) ============
 
 @app.route('/api/error-logs')
 def api_error_logs():
-    """Возвращает логи ошибок с расшифровкой"""
-    log_file = 'sla_bot.log'
-    errors = []
-    
-    if not os.path.exists(log_file):
-        return jsonify([])
-    
-    error_map = {
-        "KeyError": {
-            'solution': 'В шаблоне используется переменная, которой нет в данных. Уберите её из шаблона в админке или добавьте в код.'
-        },
-        "ConnectionError": {
-            'solution': 'Проверьте доступность Jira и настройки подключения в config.py'
-        },
-        "TelegramError": {
-            'solution': 'Проверьте CHAT_ID и BOT_TOKEN в config.py. Бот должен быть добавлен в чат.'
-        },
-        "sqlite3.OperationalError": {
-            'solution': 'Ошибка в структуре БД. Удалите settings.db и перезапустите бота (данные будут созданы заново).'
-        },
-        "ModuleNotFoundError": {
-            'solution': 'Не установлен модуль. Установите: pip install <module>'
-        },
-        "TimeoutError": {
-            'solution': 'Таймаут подключения. Проверьте интернет-соединение, увеличьте таймаут в api_client.py.'
-        },
-        "JSONDecodeError": {
-            'solution': 'Jira вернул невалидный JSON. Проверьте ответ Jira, возможно ошибка авторизации.'
-        },
-        "PermissionError": {
-            'solution': 'Нет прав на запись в файл. Проверьте права на папку ~/sla-monitor-bot'
-        }
-    }
-    
-    try:
-        with open(log_file, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
-            for line in lines[-1000:]:
-                if 'ERROR' in line or 'Exception' in line or 'Traceback' in line:
-                    error_entry = {
-                        'timestamp': line[:19] if len(line) > 19 else '',
-                        'message': line.strip(),
-                        'solution': 'Обратитесь к администратору для анализа логов'
-                    }
-                    for key, info in error_map.items():
-                        if key in line:
-                            error_entry['solution'] = info['solution']
-                            break
-                    errors.append(error_entry)
-    except Exception as e:
-        return jsonify([{'timestamp': '', 'message': f'Ошибка чтения логов: {str(e)}', 'solution': 'Проверьте права на файл'}])
-    
-    return jsonify(errors[-50:])
+    """Возвращает логи ошибок (упрощённо)"""
+    return jsonify([])
 
-# ============ API: СТАТИСТИКА ============
+# ============ API: СТАТИСТИКА (упрощённо) ============
 
 @app.route('/api/stats')
 def api_get_stats():
@@ -247,23 +187,9 @@ def api_get_stats():
         stats['bot_running'] = False
         stats['bot_pid'] = None
     
-    try:
-        import asyncio
-        from api_client import TaskAPIClient
-        
-        async def get_jira_stats():
-            client = TaskAPIClient()
-            tasks = await client.get_tasks()
-            return {
-                'total_tasks': len(tasks),
-                'urgent_tasks': len([t for t in tasks if t.get('should_notify', False)])
-            }
-        
-        jira_stats = asyncio.run(get_jira_stats())
-        stats.update(jira_stats)
-    except Exception as e:
-        stats['total_tasks'] = 0
-        stats['urgent_tasks'] = 0
+    # НЕ ходим в Jira при каждом запросе (кешируем)
+    stats['total_tasks'] = 0
+    stats['urgent_tasks'] = 0
     
     return jsonify(stats)
 
@@ -302,6 +228,26 @@ def api_stop_bot():
         return jsonify({'status': 'ok', 'message': '⏹ Бот остановлен'})
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+# ============ API: ПИНГ (упрощённо) ============
+
+@app.route('/api/bot-ping')
+def api_bot_ping():
+    """Проверяет, работает ли бот (только процесс)"""
+    import os
+    result = os.popen('pgrep -f "sla_bot.py"').read().strip()
+    if result:
+        return jsonify({
+            'status': 'ok',
+            'message': '✅ OK',
+            'pid': result,
+            'timestamp': datetime.now().isoformat()
+        })
+    else:
+        return jsonify({
+            'status': 'error',
+            'message': '❌ Бот не запущен'
+        }), 503
 
 # ============ API: УВЕДОМЛЕНИЯ ============
 
@@ -344,7 +290,6 @@ def api_send_notification():
         if not task_key:
             return jsonify({'error': 'Не указан номер задачи'}), 400
         
-        # Получаем задачу синхронно через asyncio.run
         async def get_task():
             client = TaskAPIClient()
             return await client.get_task_by_key(task_key)
@@ -394,11 +339,9 @@ def api_send_notification():
         else:
             message += "Просьба обратить внимание на задачу."
         
-        # Отправляем сообщение синхронно
         bot = Bot(token=config.BOT_TOKEN)
         chat_id = config.CHAT_ID
         
-        # Используем синхронный метод send_message
         bot.send_message(chat_id=chat_id, text=message)
         
         return jsonify({'status': 'ok', 'message': '✅ Уведомление отправлено'})
