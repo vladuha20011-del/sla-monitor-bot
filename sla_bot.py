@@ -136,6 +136,20 @@ class SLABot:
                 reopen_date_str = str(task['reopen_date'])[:16]
         return reopen_date_str
     
+    def _save_to_history(self, message_text: str, tasks: list = None, is_excel: bool = False, excel_data: str = None, excel_filename: str = None):
+        """Сохраняет отправленное сообщение в историю"""
+        try:
+            db_manager.save_notification_history(
+                message_text=message_text,
+                tasks=tasks,
+                is_excel=is_excel,
+                excel_data=excel_data,
+                excel_filename=excel_filename
+            )
+            logger.info("📝 Уведомление сохранено в историю")
+        except Exception as e:
+            logger.error(f"❌ Ошибка сохранения в историю: {e}")
+    
     async def is_user_admin(self, chat_id: int, user_id: int) -> bool:
         try:
             chat_member = await self.bot.get_chat_member(chat_id, user_id)
@@ -179,7 +193,6 @@ class SLABot:
                 if task_status in self.notify_statuses:
                     employee = find_employee_by_name(task['assignee'])
                     if employee:
-                        # Добавляем created_formatted для каждой задачи
                         task['created_formatted'] = self.format_created_date(task)
                         task['reopen_formatted'] = self.format_reopen_date(task)
                         filtered_tasks.append(task)
@@ -264,6 +277,10 @@ class SLABot:
                 caption=caption
             )
             logger.info(f"✅ Отправлен Excel отчёт с {len(tasks)} задачами")
+            
+            # Сохраняем в историю
+            excel_data = "\n".join([f"{t.get('id', '')}|{t.get('title', '')}|{t.get('assignee', '')}" for t in tasks])
+            self._save_to_history(caption, tasks, is_excel=True, excel_data=excel_data, excel_filename=excel_file.name)
             
             for task in tasks:
                 self.notified_tasks.add(task['id'])
@@ -372,6 +389,10 @@ class SLABot:
                 )
                 messages_sent += 1
                 logger.info(f"✅ Отправлено общее уведомление с {len(tasks)} задачами")
+                
+                # Сохраняем в историю
+                self._save_to_history(message, tasks)
+                
             except TelegramError as e:
                 logger.error(f"❌ Ошибка отправки общего уведомления: {e}")
     
@@ -690,7 +711,6 @@ class SLABot:
                         continue
                     
                     if not is_allowed:
-                        # Просто игнорируем личные сообщения без ответа
                         logger.info(f"⏭️ Игнорируем личное сообщение от {user_id}")
                         continue
                     
