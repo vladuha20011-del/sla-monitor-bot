@@ -1,0 +1,1391 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🤖 SLA Бот — Панель управления</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #0f0f1a;
+            color: #e0e0e0;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 0;
+            border-bottom: 1px solid #2a2a3e;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        header h1 {
+            font-size: 28px;
+            background: linear-gradient(135deg, #00d4ff, #7b2ffc);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+        .ping-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 500;
+            background: #1a1a2e;
+            border: 1px solid #2a2a3e;
+        }
+        .ping-status .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .ping-status .dot.green { background: #00c853; box-shadow: 0 0 8px #00c85388; }
+        .ping-status .dot.red { background: #ff4444; box-shadow: 0 0 8px #ff444488; }
+        .ping-status .dot.yellow { background: #ff9100; box-shadow: 0 0 8px #ff910088; }
+        .ping-status .status-ok { color: #00c853; }
+        .ping-status .status-error { color: #ff4444; }
+        .ping-status .status-loading { color: #ff9100; }
+        
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .status-dot.online { background: #00ff88; }
+        .status-dot.offline { background: #ff4444; }
+        
+        .tabs {
+            display: flex;
+            gap: 5px;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+            background: #1a1a2e;
+            padding: 8px;
+            border-radius: 12px;
+        }
+        .tab-btn {
+            padding: 12px 24px;
+            border: none;
+            background: transparent;
+            color: #888;
+            cursor: pointer;
+            border-radius: 8px;
+            font-size: 15px;
+            transition: all 0.3s;
+            font-weight: 500;
+        }
+        .tab-btn:hover {
+            background: #2a2a4e;
+            color: #fff;
+        }
+        .tab-btn.active {
+            background: linear-gradient(135deg, #00d4ff, #7b2ffc);
+            color: #fff;
+        }
+        
+        .tab-content {
+            display: none;
+            background: #1a1a2e;
+            padding: 25px;
+            border-radius: 12px;
+            border: 1px solid #2a2a3e;
+        }
+        .tab-content.active {
+            display: block;
+        }
+        
+        h2 {
+            font-size: 22px;
+            margin-bottom: 20px;
+            color: #fff;
+        }
+        h3 {
+            font-size: 16px;
+            color: #aaa;
+            margin: 20px 0 10px 0;
+        }
+        
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s;
+            font-weight: 500;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #00d4ff, #7b2ffc);
+            color: #fff;
+        }
+        .btn-primary:hover { opacity: 0.8; transform: scale(1.02); }
+        .btn-danger {
+            background: #ff4444;
+            color: #fff;
+        }
+        .btn-danger:hover { opacity: 0.8; }
+        .btn-success {
+            background: #00c853;
+            color: #fff;
+        }
+        .btn-success:hover { opacity: 0.8; }
+        .btn-warning {
+            background: #ff9100;
+            color: #fff;
+        }
+        .btn-warning:hover { opacity: 0.8; }
+        .btn-sm {
+            padding: 5px 12px;
+            font-size: 12px;
+        }
+        .btn-edit {
+            background: #2979ff;
+            color: #fff;
+        }
+        .btn-edit:hover { opacity: 0.8; }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+        th, td {
+            padding: 12px 15px;
+            text-align: left;
+            border-bottom: 1px solid #2a2a3e;
+        }
+        th {
+            color: #888;
+            font-weight: 600;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        td {
+            font-size: 14px;
+        }
+        tr:hover td {
+            background: #22223a;
+        }
+        
+        .status-badge {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+            display: inline-block;
+        }
+        .status-active { background: #00c85333; color: #00c853; }
+        .status-vacation { background: #ff910033; color: #ff9100; }
+        .status-fired { background: #ff444433; color: #ff4444; }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            color: #aaa;
+            font-size: 14px;
+        }
+        .form-group input, .form-group textarea, .form-group select {
+            width: 100%;
+            padding: 10px 15px;
+            background: #0f0f1a;
+            border: 1px solid #2a2a3e;
+            border-radius: 8px;
+            color: #e0e0e0;
+            font-size: 14px;
+            transition: border 0.3s;
+        }
+        .form-group input:focus, .form-group textarea:focus, .form-group select:focus {
+            border-color: #7b2ffc;
+            outline: none;
+        }
+        .form-group select option {
+            background: #1a1a2e;
+        }
+        .form-group textarea {
+            min-height: 80px;
+            font-family: monospace;
+        }
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .stat-card {
+            background: #0f0f1a;
+            padding: 20px;
+            border-radius: 10px;
+            border: 1px solid #2a2a3e;
+            text-align: center;
+        }
+        .stat-card .number {
+            font-size: 32px;
+            font-weight: 700;
+            background: linear-gradient(135deg, #00d4ff, #7b2ffc);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .stat-card .label {
+            font-size: 13px;
+            color: #888;
+            margin-top: 5px;
+        }
+        
+        .log-container {
+            background: #0f0f1a;
+            padding: 15px;
+            border-radius: 8px;
+            max-height: 500px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 13px;
+            white-space: pre-wrap;
+            word-break: break-all;
+            border: 1px solid #2a2a3e;
+        }
+        .log-container::-webkit-scrollbar {
+            width: 8px;
+        }
+        .log-container::-webkit-scrollbar-track {
+            background: #0f0f1a;
+        }
+        .log-container::-webkit-scrollbar-thumb {
+            background: #2a2a3e;
+            border-radius: 4px;
+        }
+        
+        .error-item {
+            background: #0f0f1a;
+            border-left: 4px solid #ff4444;
+            padding: 12px 15px;
+            border-radius: 6px;
+            margin-bottom: 10px;
+            border: 1px solid #2a2a3e;
+            border-left-color: #ff4444;
+        }
+        .error-item .timestamp {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 4px;
+        }
+        .error-item .message {
+            font-family: monospace;
+            font-size: 13px;
+            color: #ff8888;
+            margin-bottom: 6px;
+            word-break: break-all;
+        }
+        .error-item .solution {
+            font-size: 13px;
+            color: #88ccff;
+            padding: 6px 10px;
+            background: #1a1a2e;
+            border-radius: 4px;
+        }
+        .error-item .solution::before {
+            content: '💡 ';
+        }
+        .no-errors {
+            color: #00c853;
+            font-size: 16px;
+            text-align: center;
+            padding: 30px;
+        }
+        
+        .flex {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        .flex-between {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        
+        .template-item {
+            background: #0f0f1a;
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #2a2a3e;
+            margin-bottom: 10px;
+        }
+        .template-item .name {
+            font-weight: 600;
+            color: #00d4ff;
+            margin-bottom: 3px;
+            font-size: 14px;
+        }
+        .template-item .desc {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 8px;
+        }
+        .template-item textarea {
+            width: 100%;
+            padding: 8px 12px;
+            background: #0f0f1a;
+            border: 1px solid #2a2a3e;
+            border-radius: 6px;
+            color: #e0e0e0;
+            font-family: monospace;
+            font-size: 13px;
+            min-height: 60px;
+            resize: vertical;
+        }
+        
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.8);
+            z-index: 999;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal.active {
+            display: flex;
+        }
+        .modal-content {
+            background: #1a1a2e;
+            padding: 30px;
+            border-radius: 12px;
+            max-width: 500px;
+            width: 90%;
+            border: 1px solid #2a2a3e;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+        .modal-content h2 {
+            margin-bottom: 20px;
+        }
+        .modal-content .form-group select {
+            background: #0f0f1a;
+        }
+        
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            padding: 15px 25px;
+            border-radius: 10px;
+            color: #fff;
+            font-weight: 500;
+            z-index: 1000;
+            animation: slideIn 0.3s ease;
+            max-width: 400px;
+        }
+        .toast.success { background: #00c853; }
+        .toast.error { background: #ff4444; }
+        .toast.info { background: #2979ff; }
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            padding: 10px 15px;
+            background: #0f0f1a;
+            border-radius: 8px;
+            border: 1px solid #2a2a3e;
+            margin-bottom: 8px;
+        }
+        .status-item .name {
+            flex: 1;
+            font-size: 14px;
+        }
+        .status-item .toggle-label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            color: #888;
+            cursor: pointer;
+        }
+        .status-item .toggle-label input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+        }
+        
+        @media (max-width: 768px) {
+            .form-row {
+                grid-template-columns: 1fr;
+            }
+            .tabs {
+                flex-direction: column;
+            }
+            .tab-btn {
+                text-align: center;
+            }
+            header {
+                flex-direction: column;
+                text-align: center;
+            }
+            .header-right {
+                justify-content: center;
+            }
+            .status-item {
+                flex-wrap: wrap;
+            }
+            .modal-content {
+                padding: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🤖 SLA Бот — Панель управления</h1>
+            <div class="header-right">
+                <div class="ping-status" id="pingStatus">
+                    <span class="dot yellow" id="pingDot"></span>
+                    <span id="pingText">Проверка...</span>
+                </div>
+                <div class="status">
+                    <span class="status-dot online" id="statusDot"></span>
+                    <span id="statusText">Бот работает</span>
+                    <span style="margin-left: 10px; font-size: 12px; color: #666;" id="lastCheck">—</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Tabs -->
+        <div class="tabs">
+            <button class="tab-btn active" data-tab="employees">👤 Сотрудники</button>
+            <button class="tab-btn" data-tab="settings">⚙️ Настройки</button>
+            <button class="tab-btn" data-tab="statuses">📊 Статусы</button>
+            <button class="tab-btn" data-tab="templates">📝 Шаблоны</button>
+            <button class="tab-btn" data-tab="notifications">📨 Уведомления</button>
+            <button class="tab-btn" data-tab="errors">📋 Ошибки</button>
+            <button class="tab-btn" data-tab="logs">📄 Логи</button>
+            <button class="tab-btn" data-tab="system">🔧 Система</button>
+        </div>
+
+        <!-- ==================== СОТРУДНИКИ ==================== -->
+        <div class="tab-content active" id="tab-employees">
+            <div class="flex-between">
+                <h2>👤 Управление сотрудниками</h2>
+                <button class="btn btn-primary" onclick="showAddEmployee()">➕ Добавить сотрудника</button>
+            </div>
+            <div id="employeesTable">
+                <p style="color: #888;">Загрузка...</p>
+            </div>
+        </div>
+
+        <!-- ==================== НАСТРОЙКИ ==================== -->
+        <div class="tab-content" id="tab-settings">
+            <h2>⚙️ Настройки бота</h2>
+            <form id="settingsForm">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>SLA_HOURS — За сколько часов уведомлять</label>
+                        <input type="number" name="SLA_HOURS" id="SLA_HOURS" value="24">
+                    </div>
+                    <div class="form-group">
+                        <label>CHECK_INTERVAL_MINUTES — Интервал проверки (минуты)</label>
+                        <input type="number" name="CHECK_INTERVAL_MINUTES" id="CHECK_INTERVAL_MINUTES" value="180">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>TAG_START_HOUR — С какого часа тегать</label>
+                        <input type="number" name="TAG_START_HOUR" id="TAG_START_HOUR" value="9">
+                    </div>
+                    <div class="form-group">
+                        <label>TAG_END_HOUR — До какого часа тегать</label>
+                        <input type="number" name="TAG_END_HOUR" id="TAG_END_HOUR" value="18">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>TAG_ENABLED — Теги включены</label>
+                        <select name="TAG_ENABLED" id="TAG_ENABLED">
+                            <option value="True">✅ Включены</option>
+                            <option value="False">❌ Отключены</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>TAG_WORKDAYS_ONLY — Только по будням</label>
+                        <select name="TAG_WORKDAYS_ONLY" id="TAG_WORKDAYS_ONLY">
+                            <option value="True">✅ Только Пн-Пт</option>
+                            <option value="False">❌ Все дни</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>IGNORE_REPLIES — Игнорировать ответы</label>
+                        <select name="IGNORE_REPLIES" id="IGNORE_REPLIES">
+                            <option value="True">✅ Игнорировать</option>
+                            <option value="False">❌ Не игнорировать</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>IGNORE_EDITS — Игнорировать редактирования</label>
+                        <select name="IGNORE_EDITS" id="IGNORE_EDITS">
+                            <option value="True">✅ Игнорировать</option>
+                            <option value="False">❌ Не игнорировать</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>IGNORE_FORWARDS — Игнорировать пересылки</label>
+                    <select name="IGNORE_FORWARDS" id="IGNORE_FORWARDS">
+                        <option value="True">✅ Игнорировать</option>
+                        <option value="False">❌ Не игнорировать</option>
+                    </select>
+                </div>
+                <button type="submit" class="btn btn-primary">💾 Сохранить настройки</button>
+            </form>
+        </div>
+
+        <!-- ==================== СТАТУСЫ ==================== -->
+        <div class="tab-content" id="tab-statuses">
+            <div class="flex-between">
+                <h2>📊 Управление статусами задач</h2>
+                <button class="btn btn-primary" onclick="showAddStatus()">➕ Добавить статус</button>
+            </div>
+            <p style="color: #888; margin-bottom: 15px;">
+                Включите "Уведомлять" для статусов, по которым бот должен отправлять предупреждения о SLA
+            </p>
+            <div id="statusesList">
+                <p style="color: #888;">Загрузка...</p>
+            </div>
+        </div>
+
+        <!-- ==================== ШАБЛОНЫ ==================== -->
+        <div class="tab-content" id="tab-templates">
+            <h2>📝 Шаблоны сообщений</h2>
+            <p style="color: #888; margin-bottom: 15px;">
+                Редактируй текст всех сообщений, которые отправляет бот.
+                Используй переменные в фигурных скобках: {id}, {title}, {assignee}, {due_date}, {remaining}, {status}, {priority}, {url}, {created}, {reopen_date}
+            </p>
+            <div id="templatesList">
+                <p style="color: #888;">Загрузка...</p>
+            </div>
+            <button class="btn btn-primary" onclick="saveAllTemplates()" style="margin-top:15px;">💾 Сохранить все шаблоны</button>
+        </div>
+
+        <!-- ==================== УВЕДОМЛЕНИЯ ==================== -->
+        <div class="tab-content" id="tab-notifications">
+            <h2>📨 Отправка уведомления по задаче</h2>
+            <p style="color: #888; margin-bottom: 15px;">
+                Введите номер задачи, найдите её и отправьте уведомление в чат.
+            </p>
+            
+            <div style="display: flex; gap: 10px; margin-bottom: 20px;">
+                <input type="text" id="taskSearchInput" placeholder="Введите номер задачи (например, ZZ-12345)" 
+                       style="flex:1; padding: 12px 16px; background: #0f0f1a; border: 1px solid #2a2a3e; border-radius: 8px; color: #e0e0e0; font-size: 14px;">
+                <button class="btn btn-primary" onclick="searchTask()">🔍 Найти</button>
+            </div>
+            
+            <div id="taskInfo" style="display: none; background: #0f0f1a; border-radius: 8px; padding: 20px; border: 1px solid #2a2a3e; margin-bottom: 20px;">
+                <div id="taskInfoContent"></div>
+            </div>
+            
+            <div id="notificationControls" style="display: none;">
+                <div class="form-group">
+                    <label>Приоритет уведомления</label>
+                    <select id="notificationPriority" style="padding: 10px 15px; background: #0f0f1a; border: 1px solid #2a2a3e; border-radius: 8px; color: #e0e0e0; font-size: 14px; width: 100%;">
+                        <option value="Обычное">📨 Обычное</option>
+                        <option value="Важное">⚠️ Важное</option>
+                        <option value="Срочное">🚨 Срочное</option>
+                        <option value="Критичное">🔥 Критичное</option>
+                    </select>
+                </div>
+                <button class="btn btn-success" onclick="sendNotification()">📨 Отправить уведомление</button>
+            </div>
+            
+            <div id="notificationResult" style="margin-top: 15px; display: none;"></div>
+        </div>
+
+        <!-- ==================== ОШИБКИ ==================== -->
+        <div class="tab-content" id="tab-errors">
+            <div class="flex-between">
+                <h2>📋 Лог ошибок (с расшифровкой)</h2>
+                <button class="btn btn-primary btn-sm" onclick="loadErrorLogs()">🔄 Обновить</button>
+            </div>
+            <div id="errorLogsContainer">
+                <p style="color: #888;">Загрузка ошибок...</p>
+            </div>
+        </div>
+
+        <!-- ==================== ЛОГИ ==================== -->
+        <div class="tab-content" id="tab-logs">
+            <div class="flex-between">
+                <h2>📄 Полный лог бота</h2>
+                <div class="flex">
+                    <button class="btn btn-primary btn-sm" onclick="refreshLogs()">🔄 Обновить</button>
+                    <button class="btn btn-danger btn-sm" onclick="clearLogs()">🗑️ Очистить</button>
+                </div>
+            </div>
+            <div class="log-container" id="logContainer">
+                Загрузка логов...
+            </div>
+        </div>
+
+        <!-- ==================== СИСТЕМА ==================== -->
+        <div class="tab-content" id="tab-system">
+            <h2>🔧 Система</h2>
+            
+            <h3>📊 Статистика</h3>
+            <div class="stats-grid" id="statsGrid">
+                <div class="stat-card">
+                    <div class="number" id="stat_total_tasks">-</div>
+                    <div class="label">Всего задач</div>
+                </div>
+                <div class="stat-card">
+                    <div class="number" id="stat_urgent_tasks">-</div>
+                    <div class="label">Требуют уведомления</div>
+                </div>
+                <div class="stat-card">
+                    <div class="number" id="stat_employees_count">-</div>
+                    <div class="label">Сотрудников</div>
+                </div>
+                <div class="stat-card">
+                    <div class="number" id="stat_checks">-</div>
+                    <div class="label">Проверок выполнено</div>
+                </div>
+                <div class="stat-card">
+                    <div class="number" id="stat_notifications">-</div>
+                    <div class="label">Уведомлений отправлено</div>
+                </div>
+            </div>
+            
+            <h3>🔄 Управление ботом</h3>
+            <div class="flex" style="gap: 15px; margin-top: 10px;">
+                <button class="btn btn-warning" onclick="restartBot()">🔄 Перезапустить бота</button>
+                <button class="btn btn-danger" onclick="stopBot()">⏹ Остановить бота</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модалка для добавления сотрудника -->
+    <div id="employeeModal" class="modal">
+        <div class="modal-content">
+            <h2>➕ Добавить сотрудника</h2>
+            <form id="addEmployeeForm">
+                <div class="form-group">
+                    <label>ФИО (полностью)</label>
+                    <input type="text" name="full_name" required>
+                </div>
+                <div class="form-group">
+                    <label>Telegram username (с @)</label>
+                    <input type="text" name="telegram_username" required>
+                </div>
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" name="email" required>
+                </div>
+                <div class="form-group">
+                    <label>Username в Jira (опционально)</label>
+                    <input type="text" name="username">
+                </div>
+                <div class="form-group">
+                    <label>Статус</label>
+                    <select name="status">
+                        <option value="active">🟢 Активен</option>
+                        <option value="vacation">🟡 В отпуске</option>
+                        <option value="fired">🔴 Уволен</option>
+                    </select>
+                </div>
+                <div class="flex" style="gap:10px; margin-top:10px;">
+                    <button type="submit" class="btn btn-success">✅ Добавить</button>
+                    <button type="button" class="btn btn-danger" onclick="closeModal('employeeModal')">Отмена</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Модалка для редактирования сотрудника -->
+    <div id="editEmployeeModal" class="modal">
+        <div class="modal-content">
+            <h2>✏️ Редактировать сотрудника</h2>
+            <form id="editEmployeeForm">
+                <input type="hidden" name="id" id="edit_id">
+                <div class="form-group">
+                    <label>ФИО (полностью)</label>
+                    <input type="text" name="full_name" id="edit_full_name" required>
+                </div>
+                <div class="form-group">
+                    <label>Telegram username (с @)</label>
+                    <input type="text" name="telegram_username" id="edit_telegram_username" required>
+                </div>
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" name="email" id="edit_email" required>
+                </div>
+                <div class="form-group">
+                    <label>Username в Jira (опционально)</label>
+                    <input type="text" name="username" id="edit_username">
+                </div>
+                <div class="form-group">
+                    <label>Статус</label>
+                    <select name="status" id="edit_status">
+                        <option value="active">🟢 Активен</option>
+                        <option value="vacation">🟡 В отпуске</option>
+                        <option value="fired">🔴 Уволен</option>
+                    </select>
+                </div>
+                <div class="flex" style="gap:10px; margin-top:10px;">
+                    <button type="submit" class="btn btn-success">✅ Сохранить</button>
+                    <button type="button" class="btn btn-danger" onclick="closeModal('editEmployeeModal')">Отмена</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        // ============ ИНИЦИАЛИЗАЦИЯ ============
+        document.addEventListener('DOMContentLoaded', function() {
+            loadEmployees();
+            loadSettings();
+            loadStatuses();
+            loadTemplates();
+            loadErrorLogs();
+            loadLogs();
+            loadStats();
+            setupTabs();
+            setupForms();
+            updateStatus();
+            updatePing();
+            setInterval(updateStatus, 30000);
+            setInterval(updatePing, 30000);
+        });
+
+        // ============ ВКЛАДКИ ============
+        function setupTabs() {
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                    this.classList.add('active');
+                    document.getElementById('tab-' + this.dataset.tab).classList.add('active');
+                    
+                    if (this.dataset.tab === 'system') {
+                        loadStats();
+                    }
+                    if (this.dataset.tab === 'errors') {
+                        loadErrorLogs();
+                    }
+                    if (this.dataset.tab === 'logs') {
+                        loadLogs();
+                    }
+                });
+            });
+        }
+
+        function setupForms() {
+            document.getElementById('addEmployeeForm').addEventListener('submit', function(e) {
+                e.preventDefault();
+                const formData = new FormData(this);
+                const data = Object.fromEntries(formData);
+                data.search_names = data.full_name.split(' ').slice(0, 2);
+                
+                fetch('/api/employees', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                })
+                .then(r => r.json())
+                .then(() => {
+                    closeModal('employeeModal');
+                    loadEmployees();
+                    loadStats();
+                    showToast('✅ Сотрудник добавлен', 'success');
+                    this.reset();
+                })
+                .catch(() => showToast('❌ Ошибка добавления', 'error'));
+            });
+
+            document.getElementById('editEmployeeForm').addEventListener('submit', function(e) {
+                e.preventDefault();
+                const formData = new FormData(this);
+                const data = Object.fromEntries(formData);
+                const id = data.id;
+                delete data.id;
+                data.search_names = data.full_name.split(' ').slice(0, 2);
+                
+                fetch('/api/employees/' + id, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                })
+                .then(r => r.json())
+                .then(() => {
+                    closeModal('editEmployeeModal');
+                    loadEmployees();
+                    loadStats();
+                    showToast('✅ Сотрудник обновлён', 'success');
+                })
+                .catch(() => showToast('❌ Ошибка обновления', 'error'));
+            });
+
+            document.getElementById('settingsForm').addEventListener('submit', function(e) {
+                e.preventDefault();
+                const formData = new FormData(this);
+                const data = Object.fromEntries(formData);
+                
+                fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                })
+                .then(r => r.json())
+                .then(() => showToast('✅ Настройки сохранены', 'success'))
+                .catch(() => showToast('❌ Ошибка сохранения', 'error'));
+            });
+        }
+
+        // ============ МОДАЛКИ ============
+        function showModal(id) {
+            document.getElementById(id).classList.add('active');
+        }
+
+        function closeModal(id) {
+            document.getElementById(id).classList.remove('active');
+        }
+
+        document.querySelectorAll('.modal').forEach(modal => {
+            modal.addEventListener('click', function(e) {
+                if (e.target === this) {
+                    this.classList.remove('active');
+                }
+            });
+        });
+
+        // ============ СОТРУДНИКИ ============
+        function loadEmployees() {
+            fetch('/api/employees')
+                .then(r => r.json())
+                .then(data => {
+                    let html = `<table>
+                        <thead><tr>
+                            <th>ID</th>
+                            <th>ФИО</th>
+                            <th>Telegram</th>
+                            <th>Email</th>
+                            <th>Статус</th>
+                            <th>Действия</th>
+                        </tr></thead>
+                        <tbody>`;
+                    data.forEach(emp => {
+                        const statusMap = {
+                            'active': { label: '🟢 Активен', cls: 'status-active' },
+                            'vacation': { label: '🟡 В отпуске', cls: 'status-vacation' },
+                            'fired': { label: '🔴 Уволен', cls: 'status-fired' }
+                        };
+                        const status = statusMap[emp.status] || statusMap['active'];
+                        html += `<tr>
+                            <td>${emp.id}</td>
+                            <td>${emp.full_name}</td>
+                            <td>${emp.telegram_username}</td>
+                            <td>${emp.email}</td>
+                            <td><span class="status-badge ${status.cls}">${status.label}</span></td>
+                            <td>
+                                <button class="btn btn-edit btn-sm" onclick="editEmployee(${emp.id})">✏️</button>
+                                <button class="btn btn-danger btn-sm" onclick="deleteEmployee(${emp.id})">🗑️</button>
+                            </td>
+                        </tr>`;
+                    });
+                    html += '</tbody></table>';
+                    document.getElementById('employeesTable').innerHTML = html;
+                    loadStats();
+                })
+                .catch(() => {
+                    document.getElementById('employeesTable').innerHTML = '<p style="color:#ff4444;">Ошибка загрузки сотрудников</p>';
+                });
+        }
+
+        function showAddEmployee() {
+            showModal('employeeModal');
+            document.getElementById('addEmployeeForm').reset();
+        }
+
+        function editEmployee(id) {
+            fetch('/api/employees/' + id)
+                .then(r => r.json())
+                .then(data => {
+                    document.getElementById('edit_id').value = data.id;
+                    document.getElementById('edit_full_name').value = data.full_name;
+                    document.getElementById('edit_telegram_username').value = data.telegram_username;
+                    document.getElementById('edit_email').value = data.email;
+                    document.getElementById('edit_username').value = data.username || '';
+                    document.getElementById('edit_status').value = data.status || 'active';
+                    showModal('editEmployeeModal');
+                })
+                .catch(() => showToast('❌ Ошибка загрузки данных сотрудника', 'error'));
+        }
+
+        function deleteEmployee(id) {
+            if (!confirm('Удалить сотрудника?')) return;
+            fetch('/api/employees/' + id, { method: 'DELETE' })
+                .then(r => r.json())
+                .then(() => {
+                    loadEmployees();
+                    loadStats();
+                    showToast('✅ Сотрудник удалён', 'success');
+                })
+                .catch(() => showToast('❌ Ошибка удаления', 'error'));
+        }
+
+        // ============ НАСТРОЙКИ ============
+        function loadSettings() {
+            fetch('/api/settings')
+                .then(r => r.json())
+                .then(data => {
+                    for (const [key, value] of Object.entries(data)) {
+                        const el = document.getElementById(key);
+                        if (el) el.value = value;
+                    }
+                });
+        }
+
+        // ============ СТАТУСЫ ============
+        function loadStatuses() {
+            fetch('/api/statuses')
+                .then(r => r.json())
+                .then(data => {
+                    let html = '';
+                    data.forEach(s => {
+                        const isChecked = s.notify_enabled ? 'checked' : '';
+                        const statusText = s.is_active ? 'Активен' : 'Неактивен';
+                        const badgeClass = s.is_active ? 'active' : 'inactive';
+                        html += `
+                            <div class="status-item">
+                                <span class="name">${s.name}</span>
+                                <span class="status-badge ${badgeClass}">${statusText}</span>
+                                <label class="toggle-label">
+                                    <input type="checkbox" ${isChecked} onchange="updateStatusNotify('${s.name}', this.checked)">
+                                    Уведомлять
+                                </label>
+                                <button class="btn btn-danger btn-sm" onclick="deleteStatus('${s.name}')">🗑️</button>
+                            </div>
+                        `;
+                    });
+                    document.getElementById('statusesList').innerHTML = html || '<p style="color:#888;">Нет статусов</p>';
+                })
+                .catch(() => {
+                    document.getElementById('statusesList').innerHTML = '<p style="color:#ff4444;">Ошибка загрузки статусов</p>';
+                });
+        }
+
+        function updateStatusNotify(name, enabled) {
+            fetch('/api/statuses/' + encodeURIComponent(name), {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ notify_enabled: enabled ? 1 : 0 })
+            })
+            .then(r => r.json())
+            .then(() => {
+                showToast('✅ Статус обновлён', 'success');
+                loadStatuses();
+            })
+            .catch(() => showToast('❌ Ошибка обновления статуса', 'error'));
+        }
+
+        function showAddStatus() {
+            const name = prompt('Введите название статуса:');
+            if (!name) return;
+            fetch('/api/statuses', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, notify_enabled: 1 })
+            })
+            .then(r => r.json())
+            .then(() => {
+                loadStatuses();
+                showToast('✅ Статус добавлен', 'success');
+            })
+            .catch(() => showToast('❌ Ошибка добавления', 'error'));
+        }
+
+        function deleteStatus(name) {
+            if (!confirm(`Удалить статус "${name}"?`)) return;
+            fetch('/api/statuses/' + encodeURIComponent(name), { method: 'DELETE' })
+                .then(r => r.json())
+                .then(() => {
+                    loadStatuses();
+                    showToast('✅ Статус удалён', 'success');
+                })
+                .catch(() => showToast('❌ Ошибка удаления', 'error'));
+        }
+
+        // ============ ШАБЛОНЫ ============
+        function loadTemplates() {
+            fetch('/api/templates')
+                .then(r => r.json())
+                .then(data => {
+                    let html = '';
+                    const descriptions = {
+                        'header': 'Заголовок уведомления',
+                        'footer': 'Финальная фраза',
+                        'task_format': 'Формат задачи в рассылке',
+                        'check_task_format': 'Формат задачи в /check',
+                        'reopen_format': 'Текст для переоткрытой задачи (доступна переменная {reopen_date})',
+                        'alarm_header': 'Заголовок для /alarm',
+                        'alarm_footer': 'Финальная фраза для /alarm',
+                        'request_caption': 'Подпись для /request',
+                        'checking_dep_caption': 'Подпись для /checking_dep'
+                    };
+                    for (const [name, template] of Object.entries(data)) {
+                        const desc = descriptions[name] || name;
+                        html += `
+                            <div class="template-item">
+                                <div class="name">${name}</div>
+                                <div class="desc">${desc}</div>
+                                <textarea id="template_${name}" data-name="${name}">${template || ''}</textarea>
+                            </div>
+                        `;
+                    }
+                    document.getElementById('templatesList').innerHTML = html || '<p style="color:#888;">Нет шаблонов</p>';
+                })
+                .catch(() => {
+                    document.getElementById('templatesList').innerHTML = '<p style="color:#ff4444;">Ошибка загрузки шаблонов</p>';
+                });
+        }
+
+        function saveAllTemplates() {
+            const textareas = document.querySelectorAll('#templatesList textarea');
+            const data = {};
+            textareas.forEach(ta => {
+                data[ta.dataset.name] = ta.value;
+            });
+            
+            fetch('/api/templates', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            })
+            .then(r => r.json())
+            .then(() => showToast('✅ Все шаблоны сохранены', 'success'))
+            .catch(() => showToast('❌ Ошибка сохранения', 'error'));
+        }
+
+        // ============ УВЕДОМЛЕНИЯ ============
+        let currentTask = null;
+
+        function searchTask() {
+            const input = document.getElementById('taskSearchInput');
+            const taskKey = input.value.trim().toUpperCase();
+            
+            if (!taskKey) {
+                showToast('❌ Введите номер задачи', 'error');
+                return;
+            }
+            
+            if (!taskKey.match(/^ZZ-\d+$/)) {
+                showToast('❌ Неверный формат. Используйте ZZ-12345', 'error');
+                return;
+            }
+            
+            document.getElementById('taskInfo').style.display = 'block';
+            document.getElementById('taskInfoContent').innerHTML = '<p style="color: #888;">⏳ Поиск задачи...</p>';
+            document.getElementById('notificationControls').style.display = 'none';
+            
+            fetch('/api/task/' + taskKey)
+                .then(r => {
+                    if (!r.ok) {
+                        if (r.status === 404) {
+                            throw new Error('Задача не найдена');
+                        }
+                        throw new Error('Ошибка сервера');
+                    }
+                    return r.json();
+                })
+                .then(task => {
+                    currentTask = task;
+                    const dueDate = task.due_date ? new Date(task.due_date).toLocaleString('ru-RU') : 'не указан';
+                    const assigneeDisplay = task.assignee_display || task.assignee;
+                    
+                    // Ищем сотрудника в БД для получения тега
+                    fetch('/api/employees')
+                        .then(r => r.json())
+                        .then(employees => {
+                            const emp = employees.find(e => e.full_name === task.assignee);
+                            const mention = emp ? emp.telegram_username : '@' + task.assignee.replace(' ', '_');
+                            
+                            const html = `
+                                <div style="display: grid; gap: 8px;">
+                                    <div><strong>📌 Задача:</strong> ${task.id}</div>
+                                    <div><strong>🔗 Ссылка:</strong> <a href="${task.url}" target="_blank" style="color: #00d4ff;">${task.url}</a></div>
+                                    <div><strong>📋 Название:</strong> ${task.title}</div>
+                                    <div><strong>👤 Исполнитель:</strong> ${task.assignee} ${mention}</div>
+                                    <div><strong>📈 Статус:</strong> ${task.status}</div>
+                                    <div><strong>⏰ Дедлайн:</strong> ${dueDate}</div>
+                                    <div><strong>🎯 Приоритет:</strong> ${task.priority || 'Не указан'}</div>
+                                </div>
+                            `;
+                            document.getElementById('taskInfoContent').innerHTML = html;
+                            document.getElementById('notificationControls').style.display = 'block';
+                            showToast('✅ Задача найдена', 'success');
+                        })
+                        .catch(() => {
+                            const html = `
+                                <div style="display: grid; gap: 8px;">
+                                    <div><strong>📌 Задача:</strong> ${task.id}</div>
+                                    <div><strong>🔗 Ссылка:</strong> <a href="${task.url}" target="_blank" style="color: #00d4ff;">${task.url}</a></div>
+                                    <div><strong>📋 Название:</strong> ${task.title}</div>
+                                    <div><strong>👤 Исполнитель:</strong> ${task.assignee}</div>
+                                    <div><strong>📈 Статус:</strong> ${task.status}</div>
+                                    <div><strong>⏰ Дедлайн:</strong> ${dueDate}</div>
+                                    <div><strong>🎯 Приоритет:</strong> ${task.priority || 'Не указан'}</div>
+                                </div>
+                            `;
+                            document.getElementById('taskInfoContent').innerHTML = html;
+                            document.getElementById('notificationControls').style.display = 'block';
+                            showToast('✅ Задача найдена', 'success');
+                        });
+                })
+                .catch(err => {
+                    document.getElementById('taskInfoContent').innerHTML = `<p style="color: #ff4444;">❌ ${err.message}</p>`;
+                    showToast('❌ ' + err.message, 'error');
+                });
+        }
+
+        function sendNotification() {
+            if (!currentTask) {
+                showToast('❌ Сначала найдите задачу', 'error');
+                return;
+            }
+            
+            const priority = document.getElementById('notificationPriority').value;
+            const taskKey = currentTask.id;
+            
+            if (!confirm(`Отправить уведомление по задаче ${taskKey} с приоритетом "${priority}"?`)) {
+                return;
+            }
+            
+            document.getElementById('notificationResult').style.display = 'block';
+            document.getElementById('notificationResult').innerHTML = '<p style="color: #888;">⏳ Отправка...</p>';
+            
+            fetch('/api/send-notification', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ task_key: taskKey, priority: priority })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.status === 'ok') {
+                    document.getElementById('notificationResult').innerHTML = `<p style="color: #00c853;">✅ ${data.message}</p>`;
+                    showToast('✅ Уведомление отправлено', 'success');
+                    currentTask = null;
+                    document.getElementById('taskInfo').style.display = 'none';
+                    document.getElementById('notificationControls').style.display = 'none';
+                    document.getElementById('taskSearchInput').value = '';
+                } else {
+                    document.getElementById('notificationResult').innerHTML = `<p style="color: #ff4444;">❌ ${data.error}</p>`;
+                    showToast('❌ Ошибка: ' + data.error, 'error');
+                }
+            })
+            .catch(err => {
+                document.getElementById('notificationResult').innerHTML = `<p style="color: #ff4444;">❌ Ошибка: ${err.message}</p>`;
+                showToast('❌ Ошибка отправки', 'error');
+            });
+            
+            setTimeout(() => {
+                document.getElementById('notificationResult').style.display = 'none';
+            }, 10000);
+        }
+
+        // Вход по Enter в поле поиска
+        document.addEventListener('DOMContentLoaded', function() {
+            const input = document.getElementById('taskSearchInput');
+            if (input) {
+                input.addEventListener('keypress', function(e) {
+                    if (e.key === 'Enter') {
+                        searchTask();
+                    }
+                });
+            }
+        });
+
+        // ============ ОШИБКИ ============
+        function loadErrorLogs() {
+            fetch('/api/error-logs')
+                .then(r => r.json())
+                .then(data => {
+                    if (data.length === 0) {
+                        document.getElementById('errorLogsContainer').innerHTML = 
+                            '<div class="no-errors">✅ Ошибок не найдено. Бот работает стабильно!</div>';
+                        return;
+                    }
+                    let html = '';
+                    data.forEach(err => {
+                        html += `
+                            <div class="error-item">
+                                <div class="timestamp">🕐 ${err.timestamp || 'Время неизвестно'}</div>
+                                <div class="message">${err.message}</div>
+                                <div class="solution">${err.solution}</div>
+                            </div>
+                        `;
+                    });
+                    document.getElementById('errorLogsContainer').innerHTML = html;
+                })
+                .catch(() => {
+                    document.getElementById('errorLogsContainer').innerHTML = 
+                        '<p style="color:#ff4444;">❌ Ошибка загрузки лога ошибок</p>';
+                });
+        }
+
+        // ============ ЛОГИ ============
+        function loadLogs() {
+            fetch('/api/logs')
+                .then(r => r.text())
+                .then(data => {
+                    document.getElementById('logContainer').textContent = data || 'Логи пусты';
+                })
+                .catch(() => {
+                    document.getElementById('logContainer').textContent = 'Ошибка загрузки логов';
+                });
+        }
+
+        function refreshLogs() {
+            loadLogs();
+            showToast('🔄 Логи обновлены', 'info');
+        }
+
+        function clearLogs() {
+            if (!confirm('Очистить логи?')) return;
+            fetch('/api/logs', { method: 'DELETE' })
+                .then(r => r.json())
+                .then(() => {
+                    loadLogs();
+                    showToast('🗑️ Логи очищены', 'success');
+                });
+        }
+
+        // ============ СТАТИСТИКА ============
+        function loadStats() {
+            fetch('/api/stats')
+                .then(r => r.json())
+                .then(data => {
+                    document.getElementById('stat_total_tasks').textContent = data.total_tasks || 0;
+                    document.getElementById('stat_urgent_tasks').textContent = data.urgent_tasks || 0;
+                    document.getElementById('stat_employees_count').textContent = data.employees_count || 0;
+                    document.getElementById('stat_checks').textContent = data.checks || 0;
+                    document.getElementById('stat_notifications').textContent = data.notifications || 0;
+                })
+                .catch(() => {});
+        }
+
+        // ============ СТАТУС БОТА ============
+        function updateStatus() {
+            fetch('/api/stats')
+                .then(r => r.json())
+                .then(() => {
+                    document.getElementById('statusDot').className = 'status-dot online';
+                    document.getElementById('statusText').textContent = 'Бот работает';
+                    document.getElementById('lastCheck').textContent = '🟢 ' + new Date().toLocaleTimeString();
+                })
+                .catch(() => {
+                    document.getElementById('statusDot').className = 'status-dot offline';
+                    document.getElementById('statusText').textContent = 'Бот не отвечает';
+                });
+        }
+
+        // ============ ПИНГ БОТА ============
+        function updatePing() {
+            const dot = document.getElementById('pingDot');
+            const text = document.getElementById('pingText');
+            
+            fetch('/api/bot-ping')
+                .then(r => r.json())
+                .then(data => {
+                    if (data.status === 'ok') {
+                        dot.className = 'dot green';
+                        text.className = 'status-ok';
+                        text.textContent = '✅ Пинг: OK';
+                    } else {
+                        dot.className = 'dot red';
+                        text.className = 'status-error';
+                        text.textContent = data.message || '❌ Недоступен';
+                    }
+                })
+                .catch(() => {
+                    dot.className = 'dot red';
+                    text.className = 'status-error';
+                    text.textContent = '❌ Недоступен';
+                });
+        }
+
+        // ============ УПРАВЛЕНИЕ БОТОМ ============
+        function restartBot() {
+            if (!confirm('Перезапустить бота?')) return;
+            fetch('/api/restart', { method: 'POST' })
+                .then(r => r.json())
+                .then(data => {
+                    showToast(data.message || '🔄 Бот перезапущен', 'success');
+                    setTimeout(updateStatus, 3000);
+                    setTimeout(updatePing, 3000);
+                })
+                .catch(() => showToast('❌ Ошибка перезапуска', 'error'));
+        }
+
+        function stopBot() {
+            if (!confirm('Остановить бота?')) return;
+            fetch('/api/stop', { method: 'POST' })
+                .then(r => r.json())
+                .then(data => {
+                    showToast(data.message || '⏹ Бот остановлен', 'warning');
+                    updateStatus();
+                    updatePing();
+                })
+                .catch(() => showToast('❌ Ошибка остановки', 'error'));
+        }
+
+        // ============ TOAST ============
+        function showToast(message, type = 'info') {
+            const toast = document.createElement('div');
+            toast.className = 'toast ' + type;
+            toast.textContent = message;
+            document.body.appendChild(toast);
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transition = 'opacity 0.3s';
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+    </script>
+</body>
+</html>
