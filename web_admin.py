@@ -44,7 +44,6 @@ def parse_and_save_errors():
             
             for line in last_lines:
                 if 'ERROR' in line or 'Exception' in line or 'Traceback' in line:
-                    # Проверяем, есть ли уже такая ошибка в БД
                     existing = db_manager.get_error_logs('all')
                     exists = any(line.strip() == e['message'] for e in existing)
                     if exists:
@@ -261,11 +260,14 @@ def api_clear_done_errors():
 
 @app.route('/api/stats')
 def api_get_stats():
+    """Возвращает статистику (без обращения к Jira)"""
     stats = db_manager.get_stats()
     
+    # Сотрудники из БД
     employees = db_manager.get_employees(active_only=True)
     stats['employees_count'] = len(employees)
     
+    # Статус бота (проверяем процесс)
     try:
         result = os.popen('pgrep -f "sla_bot.py"').read().strip()
         stats['bot_running'] = bool(result)
@@ -274,8 +276,19 @@ def api_get_stats():
         stats['bot_running'] = False
         stats['bot_pid'] = None
     
+    # Jira-статистика — НЕ ХОДИМ В JIRA
     stats['total_tasks'] = 0
     stats['urgent_tasks'] = 0
+    
+    # Количество активных ошибок
+    errors = db_manager.get_error_logs('active')
+    stats['active_errors'] = len(errors)
+    
+    # Количество записей в истории уведомлений
+    try:
+        stats['history_count'] = db_manager.get_notification_stats()['total']
+    except:
+        stats['history_count'] = 0
     
     return jsonify(stats)
 
@@ -403,7 +416,6 @@ def api_send_notification():
         
         employee = db_manager.get_employee_by_name(task['assignee'])
         
-        # Проверяем статус сотрудника
         if employee and employee.get('status') == 'active':
             mention = employee['telegram_username']
         else:
@@ -460,6 +472,12 @@ def api_send_notification():
         response = requests.post(url, json=payload, timeout=10)
         
         if response.status_code == 200:
+            # Сохраняем в историю
+            db_manager.save_notification_history(
+                message_text=message,
+                tasks=[task],
+                is_excel=False
+            )
             return jsonify({'status': 'ok', 'message': '✅ Уведомление отправлено'})
         else:
             logger.error(f"❌ Ошибка Telegram API: {response.status_code} - {response.text}")
@@ -468,6 +486,119 @@ def api_send_notification():
     except Exception as e:
         logger.error(f"❌ Ошибка отправки уведомления: {e}")
         return jsonify({'error': str(e)}), 500
+
+
+# ============ API: ИСТОРИЯ УВЕДОМЛЕНИЙ ============
+
+@app.route('/api/notification-history')
+def api_notification_history():
+    """Получить историю уведомлений"""
+    limit = request.args.get('limit', 100, type=int)
+    search = request.args.get('search', '')
+    history = db_manager.get_notification_history(limit=limit, search=search)
+    return jsonify(history)
+
+
+@app.route('/api/notification-history/<int:history_id>/resend', methods=['POST'])
+def api_resend_notification(history_id):
+    """Повторно отправить уведомление"""
+    try:
+        import requests
+        import config
+        
+        record = db_manager.get_notification_by_id(history_id)
+        if not record:
+            return jsonify({'error': 'Запись не найдена'}), 404
+        
+        # Если был Excel-файл
+        if record['is_excel'] and record['excel_data']:
+            import io
+            from openpyxl import Workbook
+            
+            lines = record['excel_data'].strip().split('\n')
+            tasks = []
+            for line in lines:
+                parts = line.split('|')
+                if len(parts) >= 3:
+                    tasks.append({
+                        'id': parts[0],
+                        'title': parts[1],
+                        'assignee': parts[2]
+                    })
+            
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "SLA Отчёт"
+            
+            headers = ['ID', 'Название', 'Исполнитель']
+            for col, header in enumerate(headers, 1):
+                ws.cell(row=1, column=col, value=header)
+            
+            for row, task in enumerate(tasks, 2):
+                ws.cell(row=row, column=1, value=task['id'])
+                ws.cell(row=row, column=2, value=task['title'])
+                ws.cell(row=row, column=3, value=task['assignee'])
+            
+            excel_bytes = io.BytesIO()
+            wb.save(excel_bytes)
+            excel_bytes.seek(0)
+            
+            bot_token = config.BOT_TOKEN
+            chat_id = config.CHAT_ID
+            
+            files = {
+                'document': (record['excel_filename'] or 'report.xlsx', excel_bytes, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+            }
+            data = {
+                'chat_id': chat_id,
+                'caption': record['message_text']
+            }
+            
+            url = f"https://api.telegram.org/bot{bot_token}/sendDocument"
+            response = requests.post(url, data=data, files=files, timeout=30)
+            
+            if response.status_code == 200:
+                return jsonify({'status': 'ok', 'message': '✅ Excel-отчёт переотправлен'})
+            else:
+                return jsonify({'error': f'Ошибка Telegram API: {response.status_code}'}), 500
+        
+        # Если текстовое сообщение
+        else:
+            bot_token = config.BOT_TOKEN
+            chat_id = config.CHAT_ID
+            
+            url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+            payload = {
+                "chat_id": chat_id,
+                "text": record['message_text'],
+                "disable_web_page_preview": True
+            }
+            
+            response = requests.post(url, json=payload, timeout=10)
+            
+            if response.status_code == 200:
+                return jsonify({'status': 'ok', 'message': '✅ Уведомление переотправлено'})
+            else:
+                return jsonify({'error': f'Ошибка Telegram API: {response.status_code}'}), 500
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка переотправки: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/notification-history/<int:history_id>', methods=['DELETE'])
+def api_delete_notification(history_id):
+    """Удалить запись из истории"""
+    db_manager.delete_notification_history(history_id)
+    return jsonify({'status': 'ok', 'message': '✅ Запись удалена'})
+
+
+@app.route('/api/notification-history/clear', methods=['POST'])
+def api_clear_notifications():
+    """Очистить историю старше N дней"""
+    days = request.json.get('days', 30)
+    deleted = db_manager.clear_old_notifications(days)
+    return jsonify({'status': 'ok', 'message': f'✅ Удалено {deleted} записей'})
 
 
 # ============ ЗАПУСК ============
