@@ -160,6 +160,30 @@ class SLABot:
             logger.error(f"❌ Ошибка получения отправленных задач: {e}")
             return set()
     
+    async def check_vacations(self):
+        """Проверяет сотрудников в отпуске и автоматически переводит в активен"""
+        try:
+            vacation_employees = db_manager.get_vacation_employees()
+            today = datetime.now().date()
+            
+            for emp in vacation_employees:
+                if emp['vacation_end_date']:
+                    end_date = datetime.strptime(emp['vacation_end_date'], '%Y-%m-%d').date()
+                    if today > end_date:
+                        db_manager.activate_employee_from_vacation(emp['id'])
+                        logger.info(f"✅ {emp['full_name']} автоматически переведён из отпуска в Активен")
+                        
+                        try:
+                            await self.bot.send_message(
+                                chat_id=self.chat_id,
+                                text=f"✅ {emp['full_name']} вышел из отпуска и снова активен! 🟢"
+                            )
+                        except:
+                            pass
+                        
+        except Exception as e:
+            logger.error(f"❌ Ошибка проверки отпусков: {e}")
+    
     async def is_user_admin(self, chat_id: int, user_id: int) -> bool:
         try:
             chat_member = await self.bot.get_chat_member(chat_id, user_id)
@@ -196,7 +220,6 @@ class SLABot:
                 logger.info("✅ Нет задач")
                 return
             
-            # Фильтруем задачи по статусам (только те, где notify_enabled = 1)
             filtered_tasks = []
             for task in tasks:
                 task_status = task.get('status', '')
@@ -220,10 +243,7 @@ class SLABot:
                 logger.info("✅ Нет задач для уведомления")
                 return
             
-            # Получаем уже отправленные задачи из БД
             sent_task_keys = self._get_sent_task_keys()
-            
-            # Исключаем уже отправленные
             new_tasks = [t for t in tasks_to_notify if t['id'] not in sent_task_keys]
             
             if not new_tasks:
@@ -292,7 +312,6 @@ class SLABot:
             )
             logger.info(f"✅ Отправлен Excel отчёт с {len(tasks)} задачами")
             
-            # Сохраняем в историю
             excel_data = "\n".join([f"{t.get('id', '')}|{t.get('title', '')}|{t.get('assignee', '')}" for t in tasks])
             self._save_to_history(caption, tasks, is_excel=True, excel_data=excel_data, excel_filename=excel_file.name, status='sent')
             
@@ -301,7 +320,6 @@ class SLABot:
                 
         except Exception as e:
             logger.error(f"❌ Ошибка отправки Excel отчёта: {e}")
-            # Сохраняем черновик
             excel_data = "\n".join([f"{t.get('id', '')}|{t.get('title', '')}|{t.get('assignee', '')}" for t in tasks])
             self._save_to_history(caption, tasks, is_excel=True, excel_data=excel_data, excel_filename='draft.xlsx', status='pending', error_text=str(e))
     
@@ -1062,6 +1080,7 @@ class SLABot:
         logger.info(f"📋 Статусы с уведомлениями: {self.notify_statuses}")
         
         self.last_update_id = 0
+        vacation_check_counter = 0
         
         while self.is_running:
             try:
@@ -1069,6 +1088,11 @@ class SLABot:
                 if current_minute % check_interval == 0:
                     await self.check_tasks()
                     await asyncio.sleep(60)
+                
+                vacation_check_counter += 1
+                if vacation_check_counter >= 5:
+                    await self.check_vacations()
+                    vacation_check_counter = 0
                 
                 await self.handle_updates()
                 await asyncio.sleep(1)
