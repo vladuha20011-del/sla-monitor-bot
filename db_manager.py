@@ -104,7 +104,7 @@ def init_db():
             tasks_text TEXT,
             assignees_text TEXT,
             task_keys_text TEXT,
-            sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            sent_at TIMESTAMP DEFAULT (datetime('now', 'localtime'))
             is_excel INTEGER DEFAULT 0,
             excel_data TEXT,
             excel_filename TEXT,
