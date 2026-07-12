@@ -776,6 +776,11 @@
                         <option value="fired">🔴 Уволен</option>
                     </select>
                 </div>
+                <div class="form-group">
+                    <label>📅 Дата окончания отпуска (последний день)</label>
+                    <input type="date" name="vacation_end_date" id="add_vacation_end_date">
+                    <span style="font-size: 12px; color: #666;">Укажите последний день отпуска. На следующий день сотрудник автоматически станет активен.</span>
+                </div>
                 <div class="flex" style="gap:10px; margin-top:10px;">
                     <button type="submit" class="btn btn-success">✅ Добавить</button>
                     <button type="button" class="btn btn-danger" onclick="closeModal('employeeModal')">Отмена</button>
@@ -813,6 +818,11 @@
                         <option value="vacation">🟡 В отпуске</option>
                         <option value="fired">🔴 Уволен</option>
                     </select>
+                </div>
+                <div class="form-group">
+                    <label>📅 Дата окончания отпуска (последний день)</label>
+                    <input type="date" name="vacation_end_date" id="edit_vacation_end_date">
+                    <span style="font-size: 12px; color: #666;">Укажите последний день отпуска. На следующий день сотрудник автоматически станет активен.</span>
                 </div>
                 <div class="flex" style="gap:10px; margin-top:10px;">
                     <button type="submit" class="btn btn-success">✅ Сохранить</button>
@@ -873,6 +883,11 @@
                 const data = Object.fromEntries(formData);
                 data.search_names = data.full_name.split(' ').slice(0, 2);
                 
+                // Очищаем vacation_end_date если не заполнено
+                if (!data.vacation_end_date) {
+                    data.vacation_end_date = null;
+                }
+                
                 fetch('/api/employees', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -885,6 +900,7 @@
                     loadStats();
                     showToast('✅ Сотрудник добавлен', 'success');
                     this.reset();
+                    document.getElementById('add_vacation_end_date').value = '';
                 })
                 .catch(() => showToast('❌ Ошибка добавления', 'error'));
             });
@@ -896,6 +912,10 @@
                 const id = data.id;
                 delete data.id;
                 data.search_names = data.full_name.split(' ').slice(0, 2);
+                
+                if (!data.vacation_end_date) {
+                    data.vacation_end_date = null;
+                }
                 
                 fetch('/api/employees/' + id, {
                     method: 'PUT',
@@ -967,12 +987,13 @@
                             'fired': { label: '🔴 Уволен', cls: 'status-fired' }
                         };
                         const status = statusMap[emp.status] || statusMap['active'];
+                        const vacationDate = emp.vacation_end_date ? ` (до ${emp.vacation_end_date})` : '';
                         html += `<tr>
                             <td>${emp.id}</td>
                             <td>${emp.full_name}</td>
                             <td>${emp.telegram_username}</td>
                             <td>${emp.email}</td>
-                            <td><span class="status-badge ${status.cls}">${status.label}</span></td>
+                            <td><span class="status-badge ${status.cls}">${status.label}${vacationDate}</span></td>
                             <td>
                                 <button class="btn btn-edit btn-sm" onclick="editEmployee(${emp.id})">✏️</button>
                                 <button class="btn btn-danger btn-sm" onclick="deleteEmployee(${emp.id})">🗑️</button>
@@ -991,6 +1012,7 @@
         function showAddEmployee() {
             showModal('employeeModal');
             document.getElementById('addEmployeeForm').reset();
+            document.getElementById('add_vacation_end_date').value = '';
         }
 
         function editEmployee(id) {
@@ -1003,6 +1025,7 @@
                     document.getElementById('edit_email').value = data.email;
                     document.getElementById('edit_username').value = data.username || '';
                     document.getElementById('edit_status').value = data.status || 'active';
+                    document.getElementById('edit_vacation_end_date').value = data.vacation_end_date || '';
                     showModal('editEmployeeModal');
                 })
                 .catch(() => showToast('❌ Ошибка загрузки данных сотрудника', 'error'));
@@ -1317,7 +1340,6 @@
                         const assignees = record.assignees_text || '—';
                         const tasksCount = record.tasks_text ? record.tasks_text.split('\n').length : 0;
                         
-                        // Статус
                         const statusMap = {
                             'sent': { label: '✅ Отправлено', color: '#00c853' },
                             'pending': { label: '⏳ ЧЕРНОВИК', color: '#ff9100' },
@@ -1331,7 +1353,6 @@
                             previewText = previewText.substring(0, 300) + '...';
                         }
                         
-                        // Кнопки в зависимости от статуса
                         let actionButtons = '';
                         if (record.status === 'pending') {
                             actionButtons = `
