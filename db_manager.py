@@ -19,7 +19,7 @@ def init_db():
     conn = get_db_connection()
     c = conn.cursor()
     
-    # Таблица сотрудников (с полем status)
+    # Таблица сотрудников (с полем status и vacation_end_date)
     c.execute('''
         CREATE TABLE IF NOT EXISTS employees (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -29,12 +29,18 @@ def init_db():
             email TEXT,
             username TEXT,
             status TEXT DEFAULT 'active',
+            vacation_end_date TEXT,
             is_active INTEGER DEFAULT 1
         )
     ''')
     
     try:
         c.execute('ALTER TABLE employees ADD COLUMN status TEXT DEFAULT "active"')
+    except sqlite3.OperationalError:
+        pass
+    
+    try:
+        c.execute('ALTER TABLE employees ADD COLUMN vacation_end_date TEXT')
     except sqlite3.OperationalError:
         pass
     
@@ -154,7 +160,7 @@ def init_db():
         c.execute('INSERT OR IGNORE INTO task_statuses (name, notify_enabled) VALUES (?, ?)', 
                   (status, notify))
     
-    # Добавляем шаблоны по умолчанию
+    # Добавляем шаблоны по умланию
     default_templates = [
         ('header', '⚠️ Внимание! Приближается SLA!', 'Заголовок уведомления'),
         ('footer', 'Коллеги, обратите внимание!', 'Финальная фраза'),
@@ -202,6 +208,7 @@ def get_employees(active_only: bool = True) -> List[Dict]:
             'email': row['email'],
             'username': row['username'],
             'status': row['status'] if 'status' in row.keys() else 'active',
+            'vacation_end_date': row['vacation_end_date'] if 'vacation_end_date' in row.keys() else None,
             'is_active': row['is_active']
         })
     return employees
@@ -212,17 +219,19 @@ def add_employee(data: Dict) -> int:
     c = conn.cursor()
     
     status = data.get('status', 'active')
+    vacation_end_date = data.get('vacation_end_date', None)
     
     c.execute('''
-        INSERT INTO employees (full_name, search_names, telegram_username, email, username, status)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO employees (full_name, search_names, telegram_username, email, username, status, vacation_end_date)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
     ''', (
         data['full_name'],
         ','.join(data['search_names']),
         data['telegram_username'],
         data['email'],
         data['username'],
-        status
+        status,
+        vacation_end_date
     ))
     
     conn.commit()
@@ -236,10 +245,11 @@ def update_employee(employee_id: int, data: Dict):
     c = conn.cursor()
     
     status = data.get('status', 'active')
+    vacation_end_date = data.get('vacation_end_date', None)
     
     c.execute('''
         UPDATE employees 
-        SET full_name = ?, search_names = ?, telegram_username = ?, email = ?, username = ?, status = ?
+        SET full_name = ?, search_names = ?, telegram_username = ?, email = ?, username = ?, status = ?, vacation_end_date = ?
         WHERE id = ?
     ''', (
         data['full_name'],
@@ -248,6 +258,7 @@ def update_employee(employee_id: int, data: Dict):
         data['email'],
         data['username'],
         status,
+        vacation_end_date,
         employee_id
     ))
     
@@ -307,6 +318,7 @@ def get_employee_by_id(employee_id: int) -> Optional[Dict]:
             'email': row['email'],
             'username': row['username'],
             'status': row['status'] if 'status' in row.keys() else 'active',
+            'vacation_end_date': row['vacation_end_date'] if 'vacation_end_date' in row.keys() else None,
             'is_active': row['is_active']
         }
     return None
@@ -333,9 +345,45 @@ def get_active_employees_for_mention() -> List[Dict]:
             'id': row['id'],
             'full_name': row['full_name'],
             'telegram_username': row['telegram_username'],
-            'status': row['status'] if 'status' in row.keys() else 'active'
+            'status': row['status'] if 'status' in row.keys() else 'active',
+            'vacation_end_date': row['vacation_end_date'] if 'vacation_end_date' in row.keys() else None
         })
     return employees
+
+def get_vacation_employees() -> List[Dict]:
+    """Получить всех сотрудников в отпуске с датой окончания"""
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute('''
+        SELECT * FROM employees 
+        WHERE is_active = 1 AND status = 'vacation' AND vacation_end_date IS NOT NULL
+    ''')
+    rows = c.fetchall()
+    conn.close()
+    
+    employees = []
+    for row in rows:
+        employees.append({
+            'id': row['id'],
+            'full_name': row['full_name'],
+            'telegram_username': row['telegram_username'],
+            'status': row['status'] if 'status' in row.keys() else 'vacation',
+            'vacation_end_date': row['vacation_end_date'] if 'vacation_end_date' in row.keys() else None,
+            'email': row['email']
+        })
+    return employees
+
+def activate_employee_from_vacation(employee_id: int):
+    """Перевести сотрудника из отпуска в активен (очистить дату окончания)"""
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute('''
+        UPDATE employees 
+        SET status = 'active', vacation_end_date = NULL
+        WHERE id = ?
+    ''', (employee_id,))
+    conn.commit()
+    conn.close()
 
 
 # ============ РАБОТА С НАСТРОЙКАМИ ============
