@@ -200,7 +200,6 @@
         .status-active { background: #00c85333; color: #00c853; }
         .status-vacation { background: #ff910033; color: #ff9100; }
         .status-fired { background: #ff444433; color: #ff4444; }
-        .status-inactive { background: #ff444433; color: #ff4444; }
         
         .form-group {
             margin-bottom: 15px;
@@ -1055,7 +1054,7 @@
                 });
         }
 
-        // ============ СТАТУСЫ (новый дизайн) ============
+        // ============ СТАТУСЫ ============
         function loadStatuses() {
             fetch('/api/statuses')
                 .then(r => r.json())
@@ -1063,13 +1062,10 @@
                     let html = '<div style="display:grid; gap:10px;">';
                     data.forEach(s => {
                         const isNotify = s.notify_enabled ? true : false;
-                        const statusText = s.is_active ? 'Активен' : 'Неактивен';
-                        const badgeClass = s.is_active ? 'active' : 'inactive';
                         
                         html += `
                             <div class="status-item" style="display:flex; align-items:center; gap:15px; padding:12px 16px; background:#0f0f1a; border-radius:8px; border:1px solid #2a2a3e;">
                                 <span style="font-size:14px; font-weight:500; flex:1;">${s.name}</span>
-                                <span class="status-badge ${badgeClass}" style="font-size:12px;">${statusText}</span>
                                 <select onchange="updateStatusNotify('${s.name}', this.value)" 
                                         style="padding:4px 10px; background:#0f0f1a; border:1px solid #2a2a3e; border-radius:6px; color:#e0e0e0; font-size:13px; cursor:pointer;">
                                     <option value="1" ${isNotify ? 'selected' : ''}>🟢 Уведомлять</option>
