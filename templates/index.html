@@ -1335,7 +1335,7 @@
                     
                     let html = '';
                     data.forEach(record => {
-                        const sentDate = new Date(record.sent_at).toLocaleString('ru-RU');
+                        const sentDate = new Date(record.sent_at + ' UTC').toLocaleString('ru-RU');
                         const isExcel = record.is_excel;
                         const typeLabel = isExcel ? '📊 Excel-отчёт' : '📄 Текстовое сообщение';
                         const assignees = record.assignees_text || '—';
