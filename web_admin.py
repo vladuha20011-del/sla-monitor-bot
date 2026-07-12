@@ -124,6 +124,10 @@ def api_add_employee():
     if 'status' not in data:
         data['status'] = 'active'
     
+    # Добавляем vacation_end_date если есть
+    if 'vacation_end_date' not in data or not data['vacation_end_date']:
+        data['vacation_end_date'] = None
+    
     db_manager.add_employee(data)
     return jsonify({'status': 'ok', 'message': 'Сотрудник добавлен'})
 
@@ -137,6 +141,9 @@ def api_update_employee(employee_id):
     
     if 'status' not in data:
         data['status'] = 'active'
+    
+    if 'vacation_end_date' not in data or not data['vacation_end_date']:
+        data['vacation_end_date'] = None
     
     db_manager.update_employee(employee_id, data)
     return jsonify({'status': 'ok', 'message': 'Сотрудник обновлён'})
