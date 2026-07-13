@@ -173,14 +173,6 @@ class SLABot:
                         db_manager.activate_employee_from_vacation(emp['id'])
                         logger.info(f"✅ {emp['full_name']} автоматически переведён из отпуска в Активен")
                         
-                        try:
-                            await self.bot.send_message(
-                                chat_id=self.chat_id,
-                                text=f"✅ {emp['full_name']} вышел из отпуска и снова активен! 🟢"
-                            )
-                        except:
-                            pass
-                        
         except Exception as e:
             logger.error(f"❌ Ошибка проверки отпусков: {e}")
     
