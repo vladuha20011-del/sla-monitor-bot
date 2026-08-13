@@ -278,7 +278,8 @@ class SLABot:
         mentions = []
         for task in tasks:
             employee = find_employee_by_name(task['assignee'])
-            if employee and should_mention:
+            # Проверяем статус сотрудника — тегаем только активных
+            if employee and should_mention and employee.get('status') == 'active':
                 mentions.append(employee['telegram_username'])
         
         mentions_str = " ".join(set(mentions)) if mentions else ""
@@ -346,7 +347,8 @@ class SLABot:
         for i, task in enumerate(tasks):
             if should_mention:
                 employee = find_employee_by_name(task['assignee'])
-                if employee:
+                # Проверяем статус сотрудника — тегаем только активных
+                if employee and employee.get('status') == 'active':
                     assignee_display = f"{task['assignee']} {employee['telegram_username']}"
                 else:
                     assignee_display = task['assignee']
@@ -635,7 +637,7 @@ class SLABot:
             return api_name
         
         employee = find_employee_by_name(api_name)
-        if employee:
+        if employee and employee.get('status') == 'active':
             return f"{api_name} {employee['telegram_username']}"
         else:
             return api_name
