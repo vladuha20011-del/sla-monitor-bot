@@ -216,7 +216,12 @@ class TaskAPIClient:
                 hours_until_due = time_diff.total_seconds() / 3600
                 
                 should_notify = False
-                if hours_until_due <= warning_hours:
+                # Для переоткрытых задач без перезапуска SLA не считаем просрочку
+                if sla_source == "customfield_10611 (переоткрыта, без перезапуска SLA)":
+                    should_notify = True  # Показываем, но без просрочки
+                    hours_until_due = 9999  # Не считаем просроченным
+                    logger.info(f"ℹ️ Задача {issue.get('key')}: переоткрыта без перезапуска SLA (информационное уведомление)")
+                elif hours_until_due <= warning_hours:
                     should_notify = True
                     if hours_until_due < 0:
                         logger.info(f"⚠️ Задача {issue.get('key')}: ПРОСРОЧЕНА на {abs(hours_until_due):.1f}ч (источник: {sla_source})")
@@ -248,7 +253,7 @@ class TaskAPIClient:
                 }
                 
                 tasks.append(task)
-                logger.debug(f"📅 {task['id']}: {task['title'][:30]}... | Дедлайн: {due_date.strftime('%d.%m.%Y %H:%M')} | Осталось: {hours_until_due:.1f}ч | Исп: {task['assignee']}")
+                logger.debug(f"📅 {task['id']}: {task['title'][:30]}... | Дедлайн: {due_date.strftime('%d.%m.%Y %H:%M') if due_date else 'Нет'} | Осталось: {hours_until_due:.1f}ч | Исп: {task['assignee']}")
                 
             except Exception as e:
                 logger.warning(f"Ошибка при парсинге задачи {issue.get('key')}: {e}")
@@ -268,16 +273,22 @@ class TaskAPIClient:
         Возвращает (дата, источник, оставшееся_время_текст)
         """
         
+        # 1. Проверяем стандартное поле duedate (только если нет SLA полей)
         due_date = fields.get('duedate')
-        if due_date:
+        has_sla = fields.get('customfield_10611') or fields.get('customfield_10612')
+        
+        if due_date and not has_sla:
             parsed = self._parse_date(due_date)
             if parsed:
                 return parsed, "duedate", None
         
+        # 2. Проверяем SLA поле customfield_10611 (время до решения)
         sla_data = fields.get('customfield_10611')
         if sla_data and isinstance(sla_data, dict):
             ongoing_cycle = sla_data.get('ongoingCycle')
+            
             if ongoing_cycle:
+                # Приоритет 1: remainingTime (оставшееся время)
                 remaining_time = ongoing_cycle.get('remainingTime', {})
                 remaining_text = remaining_time.get('friendly')
                 remaining_ms = remaining_time.get('millis', 0)
@@ -286,6 +297,7 @@ class TaskAPIClient:
                     due_date = datetime.now() + timedelta(milliseconds=remaining_ms)
                     return due_date, "customfield_10611 (SLA решение)", remaining_text
                 
+                # Приоритет 2: breachTime (время нарушения)
                 breach_time = ongoing_cycle.get('breachTime', {})
                 if breach_time:
                     iso_date = breach_time.get('iso8601')
@@ -293,18 +305,24 @@ class TaskAPIClient:
                         parsed = self._parse_date(iso_date)
                         if parsed:
                             return parsed, "customfield_10611 (breachTime)", remaining_text
-            
-            completed_cycles = sla_data.get('completedCycles', [])
-            if completed_cycles:
-                for cycle in completed_cycles:
-                    stop_time = cycle.get('stopTime', {})
+            else:
+                # Нет активного цикла — задача переоткрыта без перезапуска SLA
+                completed_cycles = sla_data.get('completedCycles', [])
+                if completed_cycles:
+                    # Берём дату завершения последнего цикла
+                    last_cycle = completed_cycles[-1]
+                    stop_time = last_cycle.get('stopTime', {})
                     if stop_time:
                         iso_date = stop_time.get('iso8601')
                         if iso_date:
                             parsed = self._parse_date(iso_date)
                             if parsed:
-                                return parsed, "customfield_10611 (completed)", None
+                                # Возвращаем дату, но с пометкой "переоткрыта (без перезапуска)"
+                                return parsed, "customfield_10611 (переоткрыта, без перезапуска SLA)", None
+                
+                return None, "завершено (без SLA)", None
         
+        # 3. Проверяем SLA поле customfield_10612 (время до первого отклика)
         sla_data2 = fields.get('customfield_10612')
         if sla_data2 and isinstance(sla_data2, dict):
             ongoing_cycle = sla_data2.get('ongoingCycle')
@@ -317,6 +335,7 @@ class TaskAPIClient:
                     due_date = datetime.now() + timedelta(milliseconds=remaining_ms)
                     return due_date, "customfield_10612 (SLA отклик)", remaining_text
         
+        # 4. Проверяем другие SLA поля
         other_sla_fields = ['customfield_10303', 'customfield_10305', 'customfield_11717']
         for field in other_sla_fields:
             value = fields.get(field)
@@ -445,6 +464,10 @@ class TaskAPIClient:
         hours_until_due = 9999
         if due_date:
             hours_until_due = (due_date - now).total_seconds() / 3600
+        
+        # Для переоткрытых без перезапуска SLA — не показываем просрочку
+        if sla_source == "customfield_10611 (переоткрыта, без перезапуска SLA)":
+            hours_until_due = 9999
         
         task = {
             'id': data.get('key'),
