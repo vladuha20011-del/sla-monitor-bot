@@ -4,14 +4,14 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Токен Telegram бота
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8518207763:AAGySQdpoYh1dvzcRqgKA-Bfx8PidbeHFmU")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "удален")
 
 # ID чата
-CHAT_ID = os.getenv("CHAT_ID", -1003860414028)
+CHAT_ID = os.getenv("CHAT_ID", -удален)
 
 # Настройки API сервиса
 API_URL = os.getenv("API_URL", "https://support.sbertroika.ru")
-API_TOKEN = os.getenv("API_TOKEN", "ODUxMTgzODUyODkyOm5XL0uISXn8vaT1VLN/FnQYss1K")
+API_TOKEN = os.getenv("API_TOKEN", "удален")
 API_TIMEOUT = 30
 
 # Принудительное использование IPv6
