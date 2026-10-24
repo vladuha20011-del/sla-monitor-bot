@@ -10,7 +10,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "удален")
 CHAT_ID = os.getenv("CHAT_ID", -удален)
 
 # Настройки API сервиса
-API_URL = os.getenv("API_URL", "https://support.sbertroika.ru")
+API_URL = os.getenv("API_URL", "удалено")
 API_TOKEN = os.getenv("API_TOKEN", "удален")
 API_TIMEOUT = 30
 
